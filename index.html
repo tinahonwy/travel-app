@@ -697,7 +697,7 @@ function renderItinPage(){
     <div class="form-card">
       <div class="grid2">
         <div class="field compact"><label>日期</label><div class="date-wrap"><input type="date" id="i_date" value="${e? e.date : todayStr()}"></div></div>
-        <div class="field compact"><label>時間</label><div class="date-wrap"><input type="time" id="i_time" value="${e? (e.time||'') : ''}"></div></div>
+        <div class="field compact"><label>時間（24小時制）</label><input type="text" id="i_time" placeholder="例如 14:30" inputmode="numeric" maxlength="5" value="${e? (e.time||'') : ''}"></div>
       </div>
       <div class="field compact"><label>行程標題</label><input type="text" id="i_title" placeholder="例如：淺草寺參拜" value="${e? esc(e.title||'') : ''}"></div>
       <div class="field compact"><label>地點（選填，可貼地圖連結）</label><input type="text" id="i_loc" placeholder="例如：東京都台東區淺草2-3-1" value="${e? esc(e.location||'') : ''}"></div>
@@ -710,6 +710,12 @@ function renderItinPage(){
   const cancelBtn = document.getElementById('cancelEditItin');
   if(cancelBtn) cancelBtn.onclick = ()=>{ editingItin=null; renderItinPage(); };
   document.getElementById('submitItin').onclick = submitItin;
+  const timeInput = document.getElementById('i_time');
+  timeInput.oninput = ()=>{
+    let v = timeInput.value.replace(/[^\d]/g,'').slice(0,4);
+    if(v.length>=3) v = v.slice(0,2)+':'+v.slice(2);
+    timeInput.value = v;
+  };
   renderItinList();
 }
 
@@ -765,6 +771,11 @@ async function submitItin(){
   const title = document.getElementById('i_title').value.trim();
   if(!date){ toast('請選擇日期'); return; }
   if(!title){ toast('請輸入行程標題'); return; }
+  const timeVal = document.getElementById('i_time').value.trim();
+  if(timeVal && !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal)){
+    toast('時間格式請用 24 小時制，例如 14:30');
+    return;
+  }
   const isEdit = !!editingItin;
   btn.disabled = true; btn.textContent = isEdit? '更新中…' : '儲存中…';
   const data = {
