@@ -525,6 +525,8 @@ async function handleAuthSubmit(){
       await db.collection('users').doc(cred.user.uid).set({
         name, email, color: autoColor, createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      currentProfile = { name, email, color: autoColor };
+      if(currentUser) renderApp();
     }
   }catch(e){
     const msgMap = {
