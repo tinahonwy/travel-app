@@ -766,7 +766,6 @@ function renderItinList(){
 }
 
 function itinCard(it){
-  const mine = it.uid === currentUser.uid;
   const isUrl = it.location && /^https?:\/\//.test(it.location.trim());
   return `
     <div class="itin-card">
@@ -778,7 +777,7 @@ function itinCard(it){
         <div class="itin-meta">
           <span class="badge" style="background:${nameColor(it.name)+'22'};color:${nameColor(it.name)}">${esc(it.name)}</span>
         </div>
-        ${mine ? `<div class="expense-actions"><button class="edit-btn" data-id="${it.id}">編輯</button><button class="del-btn" data-id="${it.id}">刪除</button></div>` : ''}
+        <div class="expense-actions"><button class="edit-btn" data-id="${it.id}">編輯</button><button class="del-btn" data-id="${it.id}">刪除</button></div>
       </div>
     </div>
   `;
@@ -932,7 +931,6 @@ function renderExpList(){
 }
 
 function expCard(x){
-  const mine = x.uid === currentUser.uid;
   const split = (x.splitNames && x.splitNames.length) ? x.splitNames : [];
   return `
     <div class="expense-card">
@@ -941,7 +939,7 @@ function expCard(x){
         <span class="expense-amt">NT$${Number(x.amount)||0}</span>
       </div>
       <div class="expense-meta">${formatDateShort(x.date)} · <span class="badge" style="background:${nameColor(x.payerName)+'22'};color:${nameColor(x.payerName)}">${esc(x.payerName)} 付款</span> · 均分：${split.map(esc).join('、')||'（無）'}</div>
-      ${mine ? `<div class="expense-actions"><button class="edit-btn" data-id="${x.id}">編輯</button><button class="del-btn" data-id="${x.id}">刪除</button></div>` : ''}
+      <div class="expense-actions"><button class="edit-btn" data-id="${x.id}">編輯</button><button class="del-btn" data-id="${x.id}">刪除</button></div>
     </div>
   `;
 }
