@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<title>一起去旅行</title>
+<meta name="apple-mobile-web-app-title" content="一起去旅行">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans+TC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<style>
+  :root{
+    --parchment:#F3EDE2;
+    --surface:#FFFDF9;
+    --ink:#2B2320;
+    --ink-soft:#6B6058;
+    --line:#E3DACB;
+    --coral:#D9663F;
+    --coral-deep:#B94F2E;
+    --teal:#3E6259;
+    --teal-soft:#DCE7E1;
+    --blue:#3E7CB1;
+    --blue-soft:#DCE9F2;
+    --gold:#C99A3E;
+    --gold-soft:#F3E6C4;
+    --err:#B5432F;
+    --shadow: 0 1px 2px rgba(43,35,32,0.04), 0 8px 24px -12px rgba(43,35,32,0.18);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;overflow-x:hidden;}
+  body{
+    background:var(--parchment);
+    color:var(--ink);
+    font-family:'IBM Plex Sans TC', -apple-system, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  ::selection{background:var(--gold-soft);}
+  .num{font-family:'IBM Plex Mono', monospace;}
+  h1,h2,h3,.display{font-family:'Fraunces', serif;}
+  button{font-family:inherit;}
+  input,select,textarea{font-family:inherit;}
+  a{color:var(--coral-deep);}
+
+  #root{max-width:560px;margin:0 auto;min-height:100vh;min-height:100svh;position:relative;padding-bottom:calc(120px + env(safe-area-inset-bottom));}
+
+  .topbar{display:flex;align-items:baseline;justify-content:space-between;padding:22px 20px 14px;}
+  .brand{display:flex;align-items:baseline;gap:8px;}
+  .brand .mark{font-size:26px;}
+  .brand h1{font-size:21px;font-weight:600;margin:0;letter-spacing:.2px;}
+  .brand .tag{font-size:11px;color:var(--ink-soft);letter-spacing:.4px;}
+  .who{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);}
+  .who button{background:none;border:none;color:var(--ink-soft);text-decoration:underline;cursor:pointer;font-size:12px;padding:0;}
+  .profile-trigger{
+    display:flex;align-items:center;gap:8px;background:none;border:none;
+    color:var(--ink-soft);font-size:13px;font-family:inherit;cursor:pointer;padding:0;
+    text-decoration:none !important;
+  }
+  .profile-trigger:hover{color:var(--coral-deep);}
+  .avatar-mini{width:20px;height:20px;border-radius:50%;object-fit:cover;flex-shrink:0;}
+
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(43,35,32,.45);z-index:200;
+    display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;
+  }
+  .modal-card{
+    background:var(--surface);border-radius:20px;padding:22px;
+    max-width:360px;width:100%;box-shadow:var(--shadow);margin:auto;
+  }
+  .modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+  .modal-head h3{margin:0;font-size:18px;font-weight:600;color:var(--ink);}
+  .modal-close{background:none;border:none;font-size:16px;color:var(--ink-soft);cursor:pointer;padding:2px 6px;}
+  .modal-close:hover{color:var(--coral-deep);}
+  .avatar-edit{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:18px;}
+  .avatar-preview{
+    width:88px;height:88px;border-radius:50%;background:var(--gold-soft);
+    display:flex;align-items:center;justify-content:center;overflow:hidden;
+    font-size:30px;font-weight:700;color:#8A6A1E;font-family:'Fraunces',serif;
+  }
+  .avatar-preview img{width:100%;height:100%;object-fit:cover;}
+  .avatar-edit .btn-ghost{width:auto;padding:6px 4px;}
+  .color-picker{display:flex;flex-wrap:wrap;gap:10px;padding:2px 0;}
+  .color-swatch{
+    width:34px;height:34px;border-radius:50%;border:2px solid transparent;
+    cursor:pointer;padding:0;position:relative;transition:transform .1s;
+  }
+  .color-swatch:active{transform:scale(0.92);}
+  .color-swatch.selected{border-color:var(--ink);box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--ink);}
+  .color-swatch.taken{opacity:.25;cursor:not-allowed;position:relative;}
+  .color-swatch.taken::after{
+    content:'';position:absolute;inset:0;border-radius:50%;
+    background:linear-gradient(45deg,transparent 46%,#2B2320 46%,#2B2320 54%,transparent 54%);
+  }
+
+  .auth-wrap{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:32px 24px;max-width:420px;margin:0 auto;}
+  .auth-hero{margin-bottom:28px;}
+  .auth-hero .eyebrow{font-size:12px;letter-spacing:2px;color:var(--coral-deep);font-weight:600;text-transform:uppercase;margin-bottom:10px;}
+  .auth-hero h1{font-size:34px;line-height:1.15;margin:0 0 8px;font-weight:600;}
+  .auth-hero p{color:var(--ink-soft);font-size:14.5px;line-height:1.6;margin:0;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow);}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;font-weight:500;}
+  .field input, .field select{width:100%;padding:12px 13px;border-radius:10px;border:1.5px solid var(--line);background:#fff;font-size:15px;color:var(--ink);transition:border-color .15s;}
+  .field input:focus, .field select:focus{outline:none;border-color:var(--coral);}
+  .btn{width:100%;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:600;cursor:pointer;transition:transform .1s, opacity .15s;}
+  .btn:active{transform:scale(0.98);}
+  .btn-primary{background:var(--coral);color:#fff;}
+  .btn-primary:hover{background:var(--coral-deep);}
+  .btn-ghost{background:transparent;color:var(--ink-soft);text-decoration:underline;padding:8px;font-weight:500;font-size:13.5px;}
+  .auth-toggle{text-align:center;margin-top:16px;font-size:13.5px;color:var(--ink-soft);}
+  .auth-toggle a{cursor:pointer;font-weight:600;}
+  .auth-err{background:#FBEAE5;border:1px solid #EFC3B4;color:var(--err);font-size:13px;padding:10px 12px;border-radius:9px;margin-bottom:14px;line-height:1.5;}
+  .auth-ok{background:var(--teal-soft);border:1px solid #B7CFC5;color:var(--teal);font-size:13px;padding:10px 12px;border-radius:9px;margin-bottom:14px;line-height:1.5;}
+
+  .tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);display:flex;justify-content:center;z-index:50;padding-bottom:env(safe-area-inset-bottom);}
+  .tabbar-inner{max-width:560px;width:100%;display:flex;}
+  .tab{flex:1;padding:12px 4px 10px;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--ink-soft);font-size:11.5px;font-weight:500;}
+  .tab .ic{font-size:19px;}
+  .tab.active{color:var(--coral-deep);}
+
+  .page{padding:6px 20px 20px;animation:fade .25s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+  .section-title{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink-soft);font-weight:600;margin:22px 0 10px;}
+  .section-title:first-child{margin-top:4px;}
+
+  .seg{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .seg button{flex:1;border:none;background:none;padding:10px 4px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;}
+  .seg button .ic{font-size:17px;}
+  .seg button.active{background:var(--coral);color:#fff;}
+
+  .form-card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:var(--shadow);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:0;}
+  .grid2 > *{min-width:0;}
+  @media (max-width:430px){ .grid2{grid-template-columns:1fr;} }
+  .date-wrap{position:relative;overflow:hidden;border-radius:10px;border:1.5px solid var(--line);background:#fff;}
+  .date-wrap input[type=date], .date-wrap input[type=time]{
+    border:none;background:transparent;display:block;width:100%;min-width:120px;
+    padding:11px 8px;font-size:14px;color:var(--ink);box-sizing:border-box;
+  }
+  .date-wrap input:focus{outline:none;}
+  .field.compact{margin-bottom:12px;}
+  .field.compact label{font-size:11.5px;}
+  .field.compact input, .field.compact select{padding:10px 11px;font-size:14px;}
+  textarea{width:100%;padding:12px 13px;border-radius:10px;border:1.5px solid var(--line);background:#fff;font-size:15px;color:var(--ink);resize:vertical;min-height:52px;}
+  textarea:focus{outline:none;border-color:var(--coral);}
+
+  .photo-box{border:1.5px dashed var(--line);border-radius:14px;padding:14px;text-align:center;cursor:pointer;background:#FFFCF7;position:relative;overflow:hidden;}
+  .photo-box.has-img{border-style:solid;padding:0;}
+  .photo-box img{width:100%;max-height:220px;object-fit:cover;display:block;border-radius:12px;}
+  .photo-box .placeholder{color:var(--ink-soft);font-size:13px;padding:16px 0;}
+  .photo-box .placeholder .ic{font-size:26px;display:block;margin-bottom:6px;}
+  .photo-remove{position:absolute;top:8px;right:8px;background:rgba(43,35,32,.65);color:#fff;border:none;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:14px;}
+
+  .submit-row{margin-top:16px;}
+  .toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:30px;font-size:13.5px;box-shadow:var(--shadow);z-index:100;opacity:0;pointer-events:none;transition:opacity .25s, transform .25s;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
+
+  .checkbox-row{display:flex;flex-wrap:wrap;gap:8px;}
+  .check-chip{display:flex;align-items:center;gap:6px;border:1.5px solid var(--line);background:#fff;border-radius:20px;padding:7px 12px;font-size:13px;cursor:pointer;user-select:none;}
+  .check-chip input{margin:0;}
+  .check-chip.checked{border-color:var(--coral);background:#FDF1EC;}
+
+  .day-group{margin-bottom:18px;}
+  .day-label{font-size:12.5px;color:var(--ink-soft);font-weight:600;margin-bottom:8px;letter-spacing:.3px;}
+  .empty-state{text-align:center;color:var(--ink-soft);font-size:13.5px;padding:40px 10px;line-height:1.7;}
+  .empty-state .ic{font-size:34px;display:block;margin-bottom:10px;}
+
+  /* Itinerary */
+  .itin-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px 15px;margin-bottom:10px;box-shadow:var(--shadow);display:flex;gap:12px;}
+  .itin-time{width:52px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--coral-deep);font-weight:600;padding-top:2px;}
+  .itin-body{flex:1;min-width:0;}
+  .itin-title{font-size:15px;font-weight:600;margin-bottom:3px;}
+  .itin-loc{font-size:12.5px;color:var(--ink-soft);margin-bottom:4px;}
+  .itin-loc a{color:var(--blue);text-decoration:none;}
+  .itin-note{font-size:12.5px;color:var(--ink-soft);margin-top:4px;}
+  .itin-meta{display:flex;align-items:center;gap:6px;margin-top:6px;}
+
+  /* Expense */
+  .balance-block{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow);margin-bottom:16px;}
+  .balance-block h3{font-size:14px;margin:0 0 12px;font-weight:600;}
+  .balance-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .balance-row:last-child{border-bottom:none;}
+  .balance-row .val{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+  .balance-row .val.pos{color:var(--teal);}
+  .balance-row .val.neg{color:var(--err);}
+  .expense-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px 15px;margin-bottom:10px;box-shadow:var(--shadow);}
+  .expense-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;}
+  .expense-item{font-size:15px;font-weight:600;}
+  .expense-amt{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700;color:var(--coral-deep);}
+  .expense-meta{font-size:12px;color:var(--ink-soft);}
+  .expense-actions{display:flex;justify-content:flex-end;margin-top:6px;}
+  .del-btn{background:none;border:none;color:#C7B9AC;font-size:11.5px;cursor:pointer;text-decoration:underline;}
+  .del-btn:hover{color:var(--err);}
+  .edit-btn{background:none;border:none;color:var(--teal);font-size:11.5px;cursor:pointer;text-decoration:underline;margin-right:14px;}
+  .edit-btn:hover{color:var(--coral-deep);}
+  .editing-banner{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--gold-soft);color:#8A6A1E;border:1px solid #E4CB8E;
+    border-radius:12px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:14px;
+  }
+  .editing-banner button{
+    background:none;border:1.5px solid #8A6A1E;color:#8A6A1E;border-radius:20px;
+    padding:4px 12px;font-size:11.5px;font-weight:600;cursor:pointer;flex-shrink:0;
+  }
+
+  /* Todo */
+  .todo-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 15px;margin-bottom:8px;box-shadow:var(--shadow);display:flex;align-items:center;gap:12px;}
+  .todo-check{width:22px;height:22px;border-radius:6px;border:2px solid var(--line);flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;background:#fff;}
+  .todo-check.done{background:var(--teal);border-color:var(--teal);color:#fff;font-size:13px;}
+  .todo-text{flex:1;font-size:14px;min-width:0;word-break:break-word;}
+  .todo-text.done{text-decoration:line-through;color:var(--ink-soft);}
+  .todo-assignee{font-size:11px;flex-shrink:0;padding:2px 9px;border-radius:20px;font-weight:600;}
+  .todo-del{background:none;border:none;color:#C7B9AC;font-size:15px;cursor:pointer;flex-shrink:0;padding:2px 4px;}
+  .todo-del:hover{color:var(--err);}
+
+  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:var(--gold-soft);color:#8A6A1E;}
+
+  /* Board */
+  .board-compose{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:var(--shadow);margin-bottom:18px;}
+  .board-compose-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;}
+  .board-compose-head .dot{width:9px;height:9px;border-radius:50%;}
+  .board-compose textarea{margin-bottom:10px;min-height:64px;}
+  .photo-box.small{padding:10px;margin-bottom:0;}
+  .photo-box.small .placeholder{padding:6px 0;font-size:12.5px;}
+  .photo-box.small .placeholder .ic{font-size:20px;margin-bottom:3px;}
+  .photo-box.small img{max-height:180px;}
+
+  .post-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px 15px;margin-bottom:12px;box-shadow:var(--shadow);}
+  .post-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .post-avatar{width:36px;height:36px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;font-family:'Fraunces',serif;}
+  .post-avatar-img{width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;}
+  .post-headtext{flex:1;min-width:0;}
+  .post-name{font-size:13.5px;font-weight:600;}
+  .post-time{font-size:11px;color:var(--ink-soft);}
+  .post-del{background:none;border:none;color:#C7B9AC;font-size:11.5px;cursor:pointer;text-decoration:underline;flex-shrink:0;}
+  .post-del:hover{color:var(--err);}
+  .post-text{font-size:14px;line-height:1.6;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;}
+  .post-photo{width:100%;border-radius:12px;display:block;margin-bottom:10px;max-height:420px;object-fit:cover;}
+  .post-actions{display:flex;gap:8px;}
+  .comment-toggle-btn{
+    background:var(--parchment);border:1.5px solid transparent;border-radius:20px;
+    padding:7px 14px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;
+    display:flex;align-items:center;gap:5px;transition:transform .1s;
+  }
+  .comment-toggle-btn:active{transform:scale(0.96);}
+  .comments-section{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);}
+  .comments-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
+  .comments-loading, .comments-empty{font-size:12px;color:var(--ink-soft);text-align:center;padding:6px 0;}
+  .comment-row{display:flex;align-items:baseline;gap:7px;font-size:13px;line-height:1.5;}
+  .comment-name{font-weight:600;flex-shrink:0;}
+  .comment-text{flex:1;color:var(--ink);word-break:break-word;}
+  .comment-del{background:none;border:none;color:#C7B9AC;font-size:11px;cursor:pointer;flex-shrink:0;}
+  .comment-del:hover{color:var(--err);}
+  .comment-compose{display:flex;gap:8px;}
+  .comment-input{
+    flex:1;padding:9px 12px;border-radius:20px;border:1.5px solid var(--line);
+    background:#fff;font-size:13px;color:var(--ink);min-width:0;
+  }
+  .comment-input:focus{outline:none;border-color:var(--coral);}
+  .comment-send{
+    background:var(--coral);color:#fff;border:none;border-radius:20px;
+    padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;
+  }
+  .like-btn{
+    background:var(--parchment);border:1.5px solid transparent;border-radius:20px;
+    padding:7px 14px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;
+    display:flex;align-items:center;gap:5px;transition:transform .1s;
+  }
+  .like-btn:active{transform:scale(0.96);}
+  .like-btn.liked{background:var(--gold-soft);color:#8A6A1E;border-color:var(--gold);}
+
+  .loading{display:flex;align-items:center;justify-content:center;min-height:60vh;color:var(--ink-soft);font-size:14px;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ Firebase 設定：換成你自己 travel-app 專案的設定 ============ */
+const firebaseConfig = {
+  apiKey: "AIzaSyAtMm_FyE_wlduD-T-dpGJSJTduoJhhDi4",
+  authDomain: "travel-app-d60a2.firebaseapp.com",
+  projectId: "travel-app-d60a2",
+  storageBucket: "travel-app-d60a2.firebasestorage.app",
+  messagingSenderId: "421219269881",
+  appId: "1:421219269881:web:64af48d9def28394857628",
+  measurementId: "G-QRTP15451X"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const PALETTE = ["#D9663F","#3E6259","#C99A3E","#7D5BA6","#3E7CB1","#B5432F","#4C8C6B","#B65A82"];
+function nameColor(name){
+  const u = allUsers.find(x=>x.name===name && x.color);
+  if(u) return u.color;
+  let h = 0;
+  for(let i=0;i<(name||'').length;i++){ h = (h*31 + name.charCodeAt(i)) % 997; }
+  return PALETTE[h % PALETTE.length];
+}
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+async function pickAvailableColor(excludeUid){
+  try{
+    const snap = await db.collection('users').get();
+    const taken = new Set();
+    snap.forEach(d=>{
+      if(d.id===excludeUid) return;
+      if(d.data().color) taken.add(d.data().color);
+    });
+    for(const c of PALETTE){ if(!taken.has(c)) return c; }
+  }catch(e){ console.error(e); }
+  return PALETTE[0];
+}
+
+let currentUser = null;
+let currentProfile = null;
+let allUsers = [];
+let unsubUsers = null;
+
+let allItin = []; let unsubItin = null;
+let allExp = []; let unsubExp = null;
+let allTodo = []; let unsubTodo = null;
+let allPosts = []; let unsubPosts = null;
+
+let activeTab = 'itin';
+let authMode = 'login';
+let photoDataUrl = null;
+let boardPhotoDataUrl = null;
+let editingItin = null;
+let editingExp = null;
+let expSplit = [];
+let expenseFilterDate = '';
+let expandedComments = {};
+let commentsCache = {};
+let commentUnsubs = {};
+
+const root = document.getElementById('root');
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function esc(s){return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+auth.onAuthStateChanged(async (user)=>{
+  currentUser = user;
+  if(user){
+    try{
+      const doc = await db.collection('users').doc(user.uid).get();
+      currentProfile = doc.exists ? doc.data() : {name:'未命名', email:user.email};
+    }catch(e){ currentProfile = {name:'未命名', email:user.email}; }
+    if(currentProfile && !currentProfile.color){
+      pickAvailableColor(user.uid).then(color=>{
+        currentProfile.color = color;
+        db.collection('users').doc(user.uid).update({color}).catch(()=>{});
+      });
+    }
+    listenUsers();
+    listenItin();
+    listenExp();
+    listenTodo();
+    listenPosts();
+    renderApp();
+  } else {
+    [unsubUsers,unsubItin,unsubExp,unsubTodo,unsubPosts].forEach(u=>{ if(u) u(); });
+    unsubUsers=unsubItin=unsubExp=unsubTodo=unsubPosts=null;
+    allUsers=allItin=allExp=allTodo=allPosts=[];
+    renderAuth();
+  }
+});
+
+function listenUsers(){
+  if(unsubUsers) unsubUsers();
+  unsubUsers = db.collection('users').onSnapshot(snap=>{
+    allUsers = snap.docs.map(d=>({uid:d.id, ...d.data()}));
+    if(activeTab==='expense') renderExpensePage();
+  }, err=>console.error(err));
+}
+function userAvatar(uid){
+  const u = allUsers.find(x=>x.uid===uid);
+  return u && u.avatar ? u.avatar : null;
+}
+
+function listenItin(){
+  if(unsubItin) unsubItin();
+  unsubItin = db.collection('itinerary').orderBy('date','asc').orderBy('time','asc').limit(500)
+    .onSnapshot(snap=>{
+      allItin = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      if(activeTab==='itin') renderItinPage();
+    }, err=>{ console.error(err); toast('讀取行程時發生問題'); });
+}
+function listenExp(){
+  if(unsubExp) unsubExp();
+  unsubExp = db.collection('expenses').orderBy('date','desc').limit(500)
+    .onSnapshot(snap=>{
+      allExp = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      if(activeTab==='expense') renderExpensePage();
+    }, err=>{ console.error(err); toast('讀取花費時發生問題'); });
+}
+function listenTodo(){
+  if(unsubTodo) unsubTodo();
+  unsubTodo = db.collection('todos').orderBy('createdAt','asc').limit(500)
+    .onSnapshot(snap=>{
+      allTodo = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      if(activeTab==='todo') renderTodoPage();
+    }, err=>{ console.error(err); toast('讀取待辦時發生問題'); });
+}
+function listenPosts(){
+  if(unsubPosts) unsubPosts();
+  unsubPosts = db.collection('posts').orderBy('createdAt','desc').limit(200)
+    .onSnapshot(snap=>{
+      allPosts = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      if(activeTab==='board'){
+        const feedEl = document.getElementById('postFeed');
+        if(feedEl) renderPostFeed(); else renderApp();
+      }
+    }, err=>console.error(err));
+}
+
+/* ============ Auth ============ */
+function renderAuth(){
+  const isReset = authMode==='reset';
+  root.innerHTML = `
+    <div class="auth-wrap">
+      <div class="auth-hero">
+        <div class="eyebrow">一起出發</div>
+        <h1 class="display">一起去旅行</h1>
+        <p>大家共用一份行程、花費、留言板跟待辦清單，隨時同步更新。</p>
+      </div>
+      <div class="card">
+        <div id="authError"></div>
+        ${isReset ? `<p style="font-size:13px;color:var(--ink-soft);margin:0 0 16px;line-height:1.6;">輸入註冊時用的 Email，我們會寄一封重設密碼的信給你。</p>` : ''}
+        <div id="registerFields" class="${authMode==='register'?'':'hidden'}">
+          <div class="field">
+            <label>你是誰？</label>
+            <input type="text" id="regName" placeholder="輸入你的名字或暱稱" maxlength="20">
+          </div>
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="field ${isReset?'hidden':''}">
+          <label>密碼</label>
+          <input type="password" id="authPass" placeholder="至少 6 個字元" autocomplete="current-password">
+        </div>
+        <button class="btn btn-primary" id="authSubmit">${authMode==='login'?'登入':authMode==='register'?'建立帳號':'寄送重設密碼信'}</button>
+        <div class="auth-toggle">
+          ${authMode==='login'
+            ? `還沒有帳號？<a id="toRegister">建立一個</a> ・ <a id="toReset">忘記密碼？</a>`
+            : `已經有帳號了？<a id="toLogin">直接登入</a>`}
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('authSubmit').onclick = handleAuthSubmit;
+  const tr = document.getElementById('toRegister');
+  if(tr) tr.onclick = ()=>{authMode='register'; renderAuth();};
+  const tl = document.getElementById('toLogin');
+  if(tl) tl.onclick = ()=>{authMode='login'; renderAuth();};
+  const trs = document.getElementById('toReset');
+  if(trs) trs.onclick = ()=>{authMode='reset'; renderAuth();};
+}
+
+async function handleAuthSubmit(){
+  const email = document.getElementById('authEmail').value.trim();
+  const errBox = document.getElementById('authError');
+  errBox.innerHTML = '';
+  const btn = document.getElementById('authSubmit');
+  const btnLabel = authMode==='login'?'登入':authMode==='register'?'建立帳號':'寄送重設密碼信';
+
+  if(authMode==='reset'){
+    if(!email){ errBox.innerHTML = `<div class="auth-err">請輸入 Email</div>`; return; }
+    btn.disabled = true; btn.textContent = '寄送中…';
+    try{
+      await auth.sendPasswordResetEmail(email);
+      errBox.innerHTML = `<div class="auth-ok">已寄出重設密碼信，請到 ${esc(email)} 收信（記得看一下垃圾郵件匣）。</div>`;
+      btn.textContent = '已寄出 ✓';
+      setTimeout(()=>{ authMode='login'; renderAuth(); }, 2500);
+      return;
+    }catch(e){
+      const msgMap = {
+        'auth/invalid-email':'Email 格式不正確',
+        'auth/user-not-found':'找不到這個 Email 的帳號',
+      };
+      errBox.innerHTML = `<div class="auth-err">${msgMap[e.code] || ('發生錯誤：'+e.message)}</div>`;
+      btn.disabled = false; btn.textContent = btnLabel;
+      return;
+    }
+  }
+
+  const pass = document.getElementById('authPass').value;
+  if(!email || !pass){
+    errBox.innerHTML = `<div class="auth-err">請輸入 Email 和密碼</div>`;
+    return;
+  }
+  btn.disabled = true; btn.textContent = '處理中…';
+  try{
+    if(authMode==='login'){
+      await auth.signInWithEmailAndPassword(email, pass);
+    } else {
+      const name = document.getElementById('regName').value.trim();
+      if(!name){
+        errBox.innerHTML = `<div class="auth-err">請輸入你的名字或暱稱</div>`;
+        btn.disabled = false; btn.textContent = btnLabel;
+        return;
+      }
+      const cred = await auth.createUserWithEmailAndPassword(email, pass);
+      const autoColor = await pickAvailableColor(cred.user.uid);
+      await db.collection('users').doc(cred.user.uid).set({
+        name, email, color: autoColor, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  }catch(e){
+    const msgMap = {
+      'auth/invalid-email':'Email 格式不正確',
+      'auth/user-not-found':'找不到這個帳號，請確認 Email 或改成註冊',
+      'auth/wrong-password':'密碼不正確',
+      'auth/invalid-credential':'Email 或密碼不正確',
+      'auth/email-already-in-use':'這個 Email 已經註冊過了，請改成登入',
+      'auth/weak-password':'密碼至少需要 6 個字元',
+    };
+    errBox.innerHTML = `<div class="auth-err">${msgMap[e.code] || ('發生錯誤：'+e.message)}</div>`;
+  }
+  btn.disabled = false; btn.textContent = btnLabel;
+}
+
+/* ============ Profile modal ============ */
+function openProfileModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'profileModalOverlay';
+  const initialColor = currentProfile.color || nameColor(currentProfile.name);
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 class="display">編輯個人資料</h3>
+        <button class="modal-close" id="closeProfileModal">✕</button>
+      </div>
+      <div class="avatar-edit">
+        <div class="avatar-preview" id="avatarPreview">
+          ${currentProfile.avatar ? `<img src="${currentProfile.avatar}">` : `<span>${esc((currentProfile.name||'?').slice(0,1))}</span>`}
+        </div>
+        <button class="btn-ghost" id="chooseAvatarBtn">上傳頭像</button>
+        <input type="file" id="avatarInput" accept="image/*" style="display:none">
+      </div>
+      <div class="field">
+        <label>使用者名稱</label>
+        <input type="text" id="profileNameInput" value="${esc(currentProfile.name||'')}" maxlength="20">
+      </div>
+      <div class="field">
+        <label>代表色</label>
+        <div class="color-picker" id="colorPicker">
+          ${PALETTE.map(c=>{
+            const takenBy = allUsers.find(u=>u.uid!==currentUser.uid && nameColor(u.name)===c);
+            const isMine = c===initialColor;
+            const disabled = takenBy && !isMine;
+            return `<button type="button" class="color-swatch ${isMine?'selected':''} ${disabled?'taken':''}" data-color="${c}" style="background:${c}" ${disabled?`disabled title="${esc(takenBy.name)} 已經用這個顏色了"`:''}></button>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="submit-row"><button class="btn btn-primary" id="saveProfileBtn">儲存</button></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  let newAvatar = currentProfile.avatar || null;
+  let selectedColor = initialColor;
+
+  document.getElementById('closeProfileModal').onclick = ()=>overlay.remove();
+  overlay.onclick = (ev)=>{ if(ev.target===overlay) overlay.remove(); };
+
+  document.getElementById('chooseAvatarBtn').onclick = ()=>document.getElementById('avatarInput').click();
+  document.getElementById('avatarInput').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 320;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale;
+        canvas.height = img.height*scale;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        newAvatar = canvas.toDataURL('image/jpeg', 0.82);
+        document.getElementById('avatarPreview').innerHTML = `<img src="${newAvatar}">`;
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  document.getElementById('colorPicker').querySelectorAll('.color-swatch:not([disabled])').forEach(sw=>{
+    sw.onclick = ()=>{
+      selectedColor = sw.dataset.color;
+      document.getElementById('colorPicker').querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected'));
+      sw.classList.add('selected');
+    };
+  });
+
+  document.getElementById('saveProfileBtn').onclick = async ()=>{
+    const btn = document.getElementById('saveProfileBtn');
+    const name = document.getElementById('profileNameInput').value.trim();
+    if(!name){ toast('請輸入名字'); return; }
+    const nameChanged = name !== currentProfile.name;
+    btn.disabled = true; btn.textContent = nameChanged ? '同步舊紀錄中…' : '儲存中…';
+    try{
+      await db.collection('users').doc(currentUser.uid).update({ name, avatar: newAvatar || null, color: selectedColor });
+      if(nameChanged){ await syncNameAcrossData(currentUser.uid, name); }
+      currentProfile.name = name;
+      currentProfile.avatar = newAvatar || null;
+      currentProfile.color = selectedColor;
+      overlay.remove();
+      toast('已更新個人資料 ✨');
+      renderApp();
+    }catch(e){
+      console.error(e);
+      toast('更新失敗：'+e.message);
+      btn.disabled = false; btn.textContent = '儲存';
+    }
+  };
+}
+
+async function syncNameAcrossData(uid, newName){
+  const colls = ['itinerary','expenses','todos','posts'];
+  for(const c of colls){
+    const snap = await db.collection(c).where('uid','==',uid).get();
+    if(!snap.empty){
+      const batch = db.batch();
+      snap.forEach(doc=>batch.update(doc.ref, {name:newName}));
+      await batch.commit();
+    }
+  }
+  try{
+    const commentsSnap = await db.collectionGroup('comments').where('uid','==',uid).get();
+    if(!commentsSnap.empty){
+      const batch3 = db.batch();
+      commentsSnap.forEach(doc=>batch3.update(doc.ref, {name:newName}));
+      await batch3.commit();
+    }
+  }catch(e){ console.error('comment sync failed', e); }
+}
+
+/* ============ App shell ============ */
+function renderApp(){
+  root.innerHTML = `
+    <div class="topbar">
+      <div class="brand">
+        <span class="mark">🧳</span>
+        <div>
+          <h1>一起去旅行</h1>
+          <div class="tag">旅程共享空間</div>
+        </div>
+      </div>
+      <div class="who">
+        <button class="profile-trigger" id="profileBtn">
+          ${currentProfile.avatar ? `<img class="avatar-mini" src="${currentProfile.avatar}">` : `<span class="dot" style="background:${nameColor(currentProfile.name)};width:8px;height:8px;border-radius:50%;display:inline-block;"></span>`}
+          ${esc(currentProfile.name)}
+        </button>
+        <button id="logoutBtn">登出</button>
+      </div>
+    </div>
+    <div id="page" class="page"></div>
+    <div class="tabbar"><div class="tabbar-inner">
+      <button class="tab ${activeTab==='itin'?'active':''}" data-tab="itin"><span class="ic">🗓️</span>行程</button>
+      <button class="tab ${activeTab==='expense'?'active':''}" data-tab="expense"><span class="ic">💰</span>花費</button>
+      <button class="tab ${activeTab==='board'?'active':''}" data-tab="board"><span class="ic">💬</span>留言板</button>
+      <button class="tab ${activeTab==='todo'?'active':''}" data-tab="todo"><span class="ic">✅</span>待辦</button>
+    </div></div>
+  `;
+  document.getElementById('logoutBtn').onclick = ()=>auth.signOut();
+  document.getElementById('profileBtn').onclick = ()=>openProfileModal();
+  document.querySelectorAll('.tab').forEach(b=>{
+    b.onclick = ()=>{ activeTab = b.dataset.tab; renderApp(); };
+  });
+  if(activeTab==='itin') renderItinPage();
+  else if(activeTab==='expense') renderExpensePage();
+  else if(activeTab==='board') renderBoardPage();
+  else renderTodoPage();
+}
+
+/* ============ 行程規劃 ============ */
+function renderItinPage(){
+  const page = document.getElementById('page');
+  const e = editingItin;
+  page.innerHTML = `
+    ${e ? `<div class="editing-banner">✎ 正在編輯這筆行程<button id="cancelEditItin">取消編輯</button></div>` : ''}
+    <div class="form-card">
+      <div class="grid2">
+        <div class="field compact"><label>日期</label><div class="date-wrap"><input type="date" id="i_date" value="${e? e.date : todayStr()}"></div></div>
+        <div class="field compact"><label>時間</label><div class="date-wrap"><input type="time" id="i_time" value="${e? (e.time||'') : ''}"></div></div>
+      </div>
+      <div class="field compact"><label>行程標題</label><input type="text" id="i_title" placeholder="例如：淺草寺參拜" value="${e? esc(e.title||'') : ''}"></div>
+      <div class="field compact"><label>地點（選填，可貼地圖連結）</label><input type="text" id="i_loc" placeholder="例如：東京都台東區淺草2-3-1" value="${e? esc(e.location||'') : ''}"></div>
+      <div class="field compact"><label>備註（選填）</label><textarea id="i_note" placeholder="交通方式、注意事項…">${e? esc(e.note||'') : ''}</textarea></div>
+      <div class="submit-row"><button class="btn btn-primary" id="submitItin">${e? '更新這筆行程' : '新增行程'}</button></div>
+    </div>
+    <div class="section-title">行程總覽</div>
+    <div id="itinList"></div>
+  `;
+  const cancelBtn = document.getElementById('cancelEditItin');
+  if(cancelBtn) cancelBtn.onclick = ()=>{ editingItin=null; renderItinPage(); };
+  document.getElementById('submitItin').onclick = submitItin;
+  renderItinList();
+}
+
+function renderItinList(){
+  const listEl = document.getElementById('itinList');
+  if(!listEl) return;
+  if(allItin.length===0){
+    listEl.innerHTML = `<div class="empty-state"><span class="ic">🗺️</span>還沒有任何行程<br>在上方新增第一筆行程吧</div>`;
+    return;
+  }
+  const byDate = {};
+  allItin.forEach(it=>{ (byDate[it.date] = byDate[it.date]||[]).push(it); });
+  const dates = Object.keys(byDate).sort();
+  listEl.innerHTML = dates.map(date=>`
+    <div class="day-group">
+      <div class="day-label">${formatDate(date)}</div>
+      ${byDate[date].map(itinCard).join('')}
+    </div>
+  `).join('');
+  listEl.querySelectorAll('.del-btn').forEach(b=>{ b.onclick = ()=>deleteItin(b.dataset.id); });
+  listEl.querySelectorAll('.edit-btn').forEach(b=>{
+    b.onclick = ()=>{
+      const it = allItin.find(x=>x.id===b.dataset.id);
+      if(!it) return;
+      editingItin = it;
+      renderItinPage();
+    };
+  });
+}
+
+function itinCard(it){
+  const mine = it.uid === currentUser.uid;
+  const isUrl = it.location && /^https?:\/\//.test(it.location.trim());
+  return `
+    <div class="itin-card">
+      <div class="itin-time">${esc(it.time||'--:--')}</div>
+      <div class="itin-body">
+        <div class="itin-title">${esc(it.title||'')}</div>
+        ${it.location ? `<div class="itin-loc">📍 ${isUrl ? `<a href="${esc(it.location)}" target="_blank" rel="noopener">開啟地圖連結</a>` : esc(it.location)}</div>` : ''}
+        ${it.note ? `<div class="itin-note">${esc(it.note)}</div>` : ''}
+        <div class="itin-meta">
+          <span class="badge" style="background:${nameColor(it.name)+'22'};color:${nameColor(it.name)}">${esc(it.name)}</span>
+        </div>
+        ${mine ? `<div class="expense-actions"><button class="edit-btn" data-id="${it.id}">編輯</button><button class="del-btn" data-id="${it.id}">刪除</button></div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function submitItin(){
+  const btn = document.getElementById('submitItin');
+  const date = document.getElementById('i_date').value;
+  const title = document.getElementById('i_title').value.trim();
+  if(!date){ toast('請選擇日期'); return; }
+  if(!title){ toast('請輸入行程標題'); return; }
+  const isEdit = !!editingItin;
+  btn.disabled = true; btn.textContent = isEdit? '更新中…' : '儲存中…';
+  const data = {
+    uid: currentUser.uid, name: currentProfile.name,
+    date, time: document.getElementById('i_time').value || '',
+    title, location: document.getElementById('i_loc').value.trim(),
+    note: document.getElementById('i_note').value.trim(),
+  };
+  try{
+    if(isEdit){
+      await db.collection('itinerary').doc(editingItin.id).update(data);
+      toast('已更新 ✨');
+    } else {
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      await db.collection('itinerary').add(data);
+      toast('已新增行程 🗓️');
+    }
+    editingItin = null;
+    renderItinPage();
+  }catch(e){
+    console.error(e);
+    toast('儲存失敗：'+e.message);
+    btn.disabled = false; btn.textContent = isEdit? '更新這筆行程' : '新增行程';
+  }
+}
+
+async function deleteItin(id){
+  if(!confirm('確定要刪除這筆行程嗎？')) return;
+  try{ await db.collection('itinerary').doc(id).delete(); toast('已刪除'); }
+  catch(e){ toast('刪除失敗：'+e.message); }
+}
+
+/* ============ 花費分帳 ============ */
+function renderExpensePage(){
+  const page = document.getElementById('page');
+  const e = editingExp;
+  const names = allUsers.map(u=>u.name).filter(Boolean);
+  if(!e){ expSplit = [...names]; }
+  else { expSplit = Array.isArray(e.splitNames) ? [...e.splitNames] : [...names]; }
+
+  page.innerHTML = `
+    ${e ? `<div class="editing-banner">✎ 正在編輯這筆花費<button id="cancelEditExp">取消編輯</button></div>` : ''}
+    <div class="form-card">
+      <div class="grid2">
+        <div class="field compact"><label>日期</label><div class="date-wrap"><input type="date" id="x_date" value="${e? e.date : todayStr()}"></div></div>
+        <div class="field compact"><label>金額</label><input type="number" id="x_amt" min="0" placeholder="例如 1200" value="${e&&e.amount?e.amount:''}"></div>
+      </div>
+      <div class="field compact"><label>項目名稱</label><input type="text" id="x_item" placeholder="例如：晚餐、計程車、住宿" value="${e? esc(e.item||'') : ''}"></div>
+      <div class="field compact"><label>誰付的錢</label>
+        <select id="x_payer">${names.map(n=>`<option ${e&&e.payerName===n?'selected':(!e&&n===currentProfile.name?'selected':'')}>${esc(n)}</option>`).join('')}</select>
+      </div>
+      <div class="field compact"><label>由誰均分</label>
+        <div class="checkbox-row" id="splitRow">
+          ${names.map(n=>`
+            <label class="check-chip ${expSplit.includes(n)?'checked':''}">
+              <input type="checkbox" value="${esc(n)}" ${expSplit.includes(n)?'checked':''}> ${esc(n)}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <div class="submit-row"><button class="btn btn-primary" id="submitExp">${e? '更新這筆花費' : '新增花費'}</button></div>
+    </div>
+
+    <div class="balance-block">
+      <h3>目前結算（正數＝該收回，負數＝該付出）</h3>
+      <div id="balanceList"></div>
+    </div>
+
+    <div class="section-title">花費紀錄</div>
+    <div id="expList"></div>
+  `;
+  const cancelBtn = document.getElementById('cancelEditExp');
+  if(cancelBtn) cancelBtn.onclick = ()=>{ editingExp=null; renderExpensePage(); };
+  page.querySelectorAll('#splitRow .check-chip').forEach(chip=>{
+    chip.onclick = (ev)=>{
+      // let native checkbox toggle happen, then sync class
+      setTimeout(()=>{
+        const cb = chip.querySelector('input');
+        chip.classList.toggle('checked', cb.checked);
+      },0);
+    };
+  });
+  document.getElementById('submitExp').onclick = submitExpense;
+  renderBalance();
+  renderExpList();
+}
+
+function renderBalance(){
+  const el = document.getElementById('balanceList');
+  if(!el) return;
+  const names = allUsers.map(u=>u.name).filter(Boolean);
+  const entryNames = allExp.flatMap(x=>[x.payerName, ...(x.splitNames||[])]).filter(Boolean);
+  const allNames = [...new Set([...names, ...entryNames])];
+  if(allNames.length===0 || allExp.length===0){
+    el.innerHTML = `<div class="empty-state" style="padding:16px 4px;"><span class="ic">💵</span>還沒有花費紀錄</div>`;
+    return;
+  }
+  const balance = {};
+  allNames.forEach(n=>balance[n]=0);
+  allExp.forEach(x=>{
+    const amount = Number(x.amount)||0;
+    const split = (x.splitNames && x.splitNames.length) ? x.splitNames : [x.payerName];
+    const share = amount / split.length;
+    if(balance[x.payerName]===undefined) balance[x.payerName]=0;
+    balance[x.payerName] += amount;
+    split.forEach(n=>{
+      if(balance[n]===undefined) balance[n]=0;
+      balance[n] -= share;
+    });
+  });
+  el.innerHTML = allNames.map(n=>{
+    const v = Math.round(balance[n]);
+    const cls = v>0?'pos':(v<0?'neg':'');
+    const label = v>0 ? `+${v}` : `${v}`;
+    return `<div class="balance-row"><span>${esc(n)}</span><span class="val ${cls}">${label} 元</span></div>`;
+  }).join('');
+}
+
+function renderExpList(){
+  const el = document.getElementById('expList');
+  if(!el) return;
+  let filtered = allExp;
+  if(filtered.length===0){
+    el.innerHTML = `<div class="empty-state"><span class="ic">🧾</span>還沒有花費紀錄<br>在上方新增第一筆花費吧</div>`;
+    return;
+  }
+  el.innerHTML = filtered.map(expCard).join('');
+  el.querySelectorAll('.del-btn').forEach(b=>{ b.onclick = ()=>deleteExp(b.dataset.id); });
+  el.querySelectorAll('.edit-btn').forEach(b=>{
+    b.onclick = ()=>{
+      const x = allExp.find(v=>v.id===b.dataset.id);
+      if(!x) return;
+      editingExp = x;
+      renderExpensePage();
+    };
+  });
+}
+
+function expCard(x){
+  const mine = x.uid === currentUser.uid;
+  const split = (x.splitNames && x.splitNames.length) ? x.splitNames : [];
+  return `
+    <div class="expense-card">
+      <div class="expense-top">
+        <span class="expense-item">${esc(x.item||'')}</span>
+        <span class="expense-amt">NT$${Number(x.amount)||0}</span>
+      </div>
+      <div class="expense-meta">${formatDateShort(x.date)} · <span class="badge" style="background:${nameColor(x.payerName)+'22'};color:${nameColor(x.payerName)}">${esc(x.payerName)} 付款</span> · 均分：${split.map(esc).join('、')||'（無）'}</div>
+      ${mine ? `<div class="expense-actions"><button class="edit-btn" data-id="${x.id}">編輯</button><button class="del-btn" data-id="${x.id}">刪除</button></div>` : ''}
+    </div>
+  `;
+}
+
+async function submitExpense(){
+  const btn = document.getElementById('submitExp');
+  const date = document.getElementById('x_date').value;
+  const item = document.getElementById('x_item').value.trim();
+  const amount = Number(document.getElementById('x_amt').value||0);
+  const payerName = document.getElementById('x_payer').value;
+  const splitNames = Array.from(document.querySelectorAll('#splitRow input:checked')).map(cb=>cb.value);
+  if(!date){ toast('請選擇日期'); return; }
+  if(!item){ toast('請輸入項目名稱'); return; }
+  if(amount<=0){ toast('請輸入金額'); return; }
+  if(splitNames.length===0){ toast('請至少選一個均分的人'); return; }
+  const isEdit = !!editingExp;
+  btn.disabled = true; btn.textContent = isEdit? '更新中…' : '儲存中…';
+  const data = { uid: currentUser.uid, name: currentProfile.name, date, item, amount, payerName, splitNames };
+  try{
+    if(isEdit){
+      await db.collection('expenses').doc(editingExp.id).update(data);
+      toast('已更新 ✨');
+    } else {
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      await db.collection('expenses').add(data);
+      toast('已新增花費 💰');
+    }
+    editingExp = null;
+    renderExpensePage();
+  }catch(e){
+    console.error(e);
+    toast('儲存失敗：'+e.message);
+    btn.disabled = false; btn.textContent = isEdit? '更新這筆花費' : '新增花費';
+  }
+}
+
+async function deleteExp(id){
+  if(!confirm('確定要刪除這筆花費嗎？')) return;
+  try{ await db.collection('expenses').doc(id).delete(); toast('已刪除'); }
+  catch(e){ toast('刪除失敗：'+e.message); }
+}
+
+/* ============ 待辦清單 ============ */
+function renderTodoPage(){
+  const page = document.getElementById('page');
+  const names = allUsers.map(u=>u.name).filter(Boolean);
+  page.innerHTML = `
+    <div class="form-card">
+      <div class="field compact"><label>待辦事項</label><input type="text" id="t_text" placeholder="例如：訂機票、準備轉接頭"></div>
+      <div class="field compact"><label>指派給（選填）</label>
+        <select id="t_assignee"><option value="">不指定</option>${names.map(n=>`<option>${esc(n)}</option>`).join('')}</select>
+      </div>
+      <div class="submit-row"><button class="btn btn-primary" id="submitTodo">新增待辦</button></div>
+    </div>
+    <div class="section-title">待辦中</div>
+    <div id="todoActiveList"></div>
+    <div class="section-title">已完成</div>
+    <div id="todoDoneList"></div>
+  `;
+  document.getElementById('submitTodo').onclick = submitTodo;
+  renderTodoList();
+}
+
+function renderTodoList(){
+  const activeEl = document.getElementById('todoActiveList');
+  const doneEl = document.getElementById('todoDoneList');
+  if(!activeEl || !doneEl) return;
+  const active = allTodo.filter(t=>!t.done);
+  const done = allTodo.filter(t=>t.done);
+  activeEl.innerHTML = active.length===0
+    ? `<div class="empty-state" style="padding:20px 4px;"><span class="ic">✅</span>目前沒有待辦事項</div>`
+    : active.map(todoRow).join('');
+  doneEl.innerHTML = done.length===0
+    ? `<div class="empty-state" style="padding:20px 4px;">尚無已完成項目</div>`
+    : done.map(todoRow).join('');
+  document.querySelectorAll('.todo-check').forEach(b=>{
+    b.onclick = ()=>toggleTodo(b.dataset.id, b.dataset.done==='1');
+  });
+  document.querySelectorAll('.todo-del').forEach(b=>{
+    b.onclick = ()=>deleteTodo(b.dataset.id);
+  });
+}
+
+function todoRow(t){
+  return `
+    <div class="todo-card">
+      <button class="todo-check ${t.done?'done':''}" data-id="${t.id}" data-done="${t.done?'1':'0'}">${t.done?'✓':''}</button>
+      <span class="todo-text ${t.done?'done':''}">${esc(t.text)}</span>
+      ${t.assignee ? `<span class="todo-assignee" style="background:${nameColor(t.assignee)+'22'};color:${nameColor(t.assignee)}">${esc(t.assignee)}</span>` : ''}
+      <button class="todo-del" data-id="${t.id}">✕</button>
+    </div>
+  `;
+}
+
+async function submitTodo(){
+  const btn = document.getElementById('submitTodo');
+  const text = document.getElementById('t_text').value.trim();
+  if(!text){ toast('請輸入待辦事項'); return; }
+  const assignee = document.getElementById('t_assignee').value;
+  btn.disabled = true; btn.textContent = '新增中…';
+  try{
+    await db.collection('todos').add({
+      uid: currentUser.uid, name: currentProfile.name,
+      text, assignee: assignee || null, done: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    document.getElementById('t_text').value = '';
+    toast('已新增待辦 ✅');
+  }catch(e){
+    console.error(e);
+    toast('新增失敗：'+e.message);
+  }
+  btn.disabled = false; btn.textContent = '新增待辦';
+}
+
+async function toggleTodo(id, currentlyDone){
+  try{ await db.collection('todos').doc(id).update({done: !currentlyDone}); }
+  catch(e){ toast('更新失敗：'+e.message); }
+}
+
+async function deleteTodo(id){
+  if(!confirm('確定要刪除這個待辦事項嗎？')) return;
+  try{ await db.collection('todos').doc(id).delete(); toast('已刪除'); }
+  catch(e){ toast('刪除失敗：'+e.message); }
+}
+
+/* ============ 留言板 ============ */
+function renderBoardPage(){
+  const page = document.getElementById('page');
+  boardPhotoDataUrl = null;
+  page.innerHTML = `
+    <div class="board-compose">
+      <div class="board-compose-head">
+        <span class="dot" style="background:${nameColor(currentProfile.name)};width:9px;height:9px;border-radius:50%;display:inline-block;"></span>
+        <span>${esc(currentProfile.name)}</span>
+      </div>
+      <textarea id="post_text" placeholder="分享這趟旅行的照片或心得吧～" maxlength="500"></textarea>
+      <div class="photo-box small" id="postPhotoBox">
+        <div class="placeholder"><span class="ic">📷</span>加一張照片（選填）</div>
+      </div>
+      <input type="file" id="post_photo" accept="image/*" style="display:none">
+      <div class="submit-row"><button class="btn btn-primary" id="submitPost">發佈</button></div>
+    </div>
+    <div id="postFeed"></div>
+  `;
+  const photoBox = document.getElementById('postPhotoBox');
+  const fileInput = document.getElementById('post_photo');
+  photoBox.onclick = ()=>fileInput.click();
+  fileInput.onchange = handlePostPhotoSelect;
+  document.getElementById('submitPost').onclick = submitPost;
+  renderPostFeed();
+}
+
+function handlePostPhotoSelect(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const maxW = 900;
+      const scale = Math.min(1, maxW/img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width*scale;
+      canvas.height = img.height*scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      boardPhotoDataUrl = canvas.toDataURL('image/jpeg', 0.65);
+      const box = document.getElementById('postPhotoBox');
+      box.classList.add('has-img');
+      box.innerHTML = `<img src="${boardPhotoDataUrl}"><button class="photo-remove" id="removePostPhoto">✕</button>`;
+      document.getElementById('removePostPhoto').onclick = (ev2)=>{
+        ev2.stopPropagation();
+        boardPhotoDataUrl = null;
+        box.classList.remove('has-img');
+        box.innerHTML = `<div class="placeholder"><span class="ic">📷</span>加一張照片（選填）</div>`;
+      };
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function submitPost(){
+  const btn = document.getElementById('submitPost');
+  const text = document.getElementById('post_text').value.trim();
+  if(!text && !boardPhotoDataUrl){ toast('寫點文字或加張照片吧'); return; }
+  btn.disabled = true; btn.textContent = '發佈中…';
+  try{
+    await db.collection('posts').add({
+      uid: currentUser.uid, name: currentProfile.name,
+      text, photo: boardPhotoDataUrl || null,
+      likes: [],
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    toast('已發佈 🎉');
+    document.getElementById('post_text').value = '';
+    boardPhotoDataUrl = null;
+    const box = document.getElementById('postPhotoBox');
+    if(box){
+      box.classList.remove('has-img');
+      box.innerHTML = `<div class="placeholder"><span class="ic">📷</span>加一張照片（選填）</div>`;
+    }
+  }catch(e){
+    console.error(e);
+    toast('發佈失敗：'+e.message);
+  }
+  btn.disabled = false; btn.textContent = '發佈';
+}
+
+function renderPostFeed(){
+  const feed = document.getElementById('postFeed');
+  if(!feed) return;
+  if(allPosts.length===0){
+    feed.innerHTML = `<div class="empty-state"><span class="ic">💬</span>還沒有人留言<br>分享第一張照片或一句話吧</div>`;
+    return;
+  }
+  feed.innerHTML = allPosts.map(postCard).join('');
+  feed.querySelectorAll('.like-btn').forEach(b=>{
+    b.onclick = ()=>toggleLike(b.dataset.id, b.dataset.liked==='1');
+  });
+  feed.querySelectorAll('.post-del').forEach(b=>{
+    b.onclick = ()=>deletePost(b.dataset.id);
+  });
+  feed.querySelectorAll('.comment-toggle-btn').forEach(b=>{
+    b.onclick = ()=>toggleComments(b.dataset.id);
+  });
+  allPosts.forEach(p=>{
+    if(expandedComments[p.id]){
+      const el = document.getElementById('comments-'+p.id);
+      if(el) bindCommentsSectionEvents(p.id, el);
+    }
+  });
+}
+
+function postCard(p){
+  const mine = p.uid === currentUser.uid;
+  const likes = p.likes || [];
+  const liked = currentUser && likes.includes(currentUser.uid);
+  const initial = (p.name||'?').slice(0,1);
+  const avatar = userAvatar(p.uid);
+  const avatarHtml = avatar
+    ? `<img class="post-avatar-img" src="${avatar}">`
+    : `<div class="post-avatar" style="background:${nameColor(p.name)}">${esc(initial)}</div>`;
+  const cCount = p.commentCount || 0;
+  return `
+    <div class="post-card">
+      <div class="post-head">
+        ${avatarHtml}
+        <div class="post-headtext">
+          <div class="post-name">${esc(p.name)}</div>
+          <div class="post-time">${relativeTime(p.createdAt)}</div>
+        </div>
+        ${mine ? `<button class="post-del" data-id="${p.id}">刪除</button>` : ''}
+      </div>
+      ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ''}
+      ${p.photo ? `<img class="post-photo" src="${p.photo}">` : ''}
+      <div class="post-actions">
+        <button class="like-btn ${liked?'liked':''}" data-id="${p.id}" data-liked="${liked?'1':'0'}">
+          <span class="ic">${liked?'❤️':'🤍'}</span> ${likes.length>0? likes.length+' 個讚' : '按讚'}
+        </button>
+        <button class="comment-toggle-btn" data-id="${p.id}">
+          <span class="ic">💬</span> ${cCount>0? cCount+' 則留言' : '留言'}
+        </button>
+      </div>
+      ${expandedComments[p.id] ? `<div class="comments-section" id="comments-${p.id}">${renderCommentsInner(p.id)}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderCommentsInner(postId){
+  const list = commentsCache[postId];
+  const listHtml = !list
+    ? `<div class="comments-loading">載入留言中…</div>`
+    : list.length===0
+      ? `<div class="comments-empty">還沒有留言，第一個留言吧</div>`
+      : list.map(c=>commentRow(postId,c)).join('');
+  return `
+    <div class="comments-list">${listHtml}</div>
+    <div class="comment-compose">
+      <input type="text" class="comment-input" data-post="${postId}" placeholder="留言…" maxlength="200">
+      <button class="comment-send" data-post="${postId}">送出</button>
+    </div>
+  `;
+}
+
+function commentRow(postId, c){
+  const mine = c.uid === currentUser.uid;
+  return `
+    <div class="comment-row">
+      <span class="comment-name" style="color:${nameColor(c.name)}">${esc(c.name)}</span>
+      <span class="comment-text">${esc(c.text)}</span>
+      ${mine ? `<button class="comment-del" data-post="${postId}" data-id="${c.id}">✕</button>` : ''}
+    </div>
+  `;
+}
+
+function bindCommentsSectionEvents(postId, el){
+  const sendBtn = el.querySelector('.comment-send');
+  const input = el.querySelector('.comment-input');
+  if(sendBtn) sendBtn.onclick = ()=>submitComment(postId, input);
+  if(input) input.onkeydown = (ev)=>{ if(ev.key==='Enter') submitComment(postId, input); };
+  el.querySelectorAll('.comment-del').forEach(b=>{
+    b.onclick = ()=>deleteComment(b.dataset.post, b.dataset.id);
+  });
+}
+
+function toggleComments(postId){
+  if(expandedComments[postId]){
+    expandedComments[postId] = false;
+    if(commentUnsubs[postId]){ commentUnsubs[postId](); delete commentUnsubs[postId]; }
+  } else {
+    expandedComments[postId] = true;
+    listenComments(postId);
+  }
+  renderPostFeed();
+}
+
+function listenComments(postId){
+  if(commentUnsubs[postId]) return;
+  commentUnsubs[postId] = db.collection('posts').doc(postId).collection('comments')
+    .orderBy('createdAt','asc').limit(300)
+    .onSnapshot(snap=>{
+      commentsCache[postId] = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      const el = document.getElementById('comments-'+postId);
+      if(el){
+        el.innerHTML = renderCommentsInner(postId);
+        bindCommentsSectionEvents(postId, el);
+      }
+    }, err=>console.error(err));
+}
+
+async function submitComment(postId, input){
+  const text = input.value.trim();
+  if(!text) return;
+  input.disabled = true;
+  try{
+    await db.collection('posts').doc(postId).collection('comments').add({
+      uid: currentUser.uid, name: currentProfile.name, text,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await db.collection('posts').doc(postId).update({
+      commentCount: firebase.firestore.FieldValue.increment(1)
+    });
+    input.value = '';
+  }catch(e){
+    toast('留言失敗：'+e.message);
+  }
+  input.disabled = false;
+  input.focus();
+}
+
+async function deleteComment(postId, commentId){
+  if(!confirm('確定要刪除這則留言嗎？')) return;
+  try{
+    await db.collection('posts').doc(postId).collection('comments').doc(commentId).delete();
+    await db.collection('posts').doc(postId).update({
+      commentCount: firebase.firestore.FieldValue.increment(-1)
+    });
+  }catch(e){ toast('刪除失敗：'+e.message); }
+}
+
+async function toggleLike(id, currentlyLiked){
+  try{
+    await db.collection('posts').doc(id).update({
+      likes: currentlyLiked
+        ? firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
+        : firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+    });
+  }catch(e){ toast('操作失敗：'+e.message); }
+}
+
+async function deletePost(id){
+  if(!confirm('確定要刪除這則留言嗎？')) return;
+  try{
+    if(commentUnsubs[id]){ commentUnsubs[id](); delete commentUnsubs[id]; }
+    await db.collection('posts').doc(id).delete();
+    toast('已刪除');
+  }catch(e){ toast('刪除失敗：'+e.message); }
+}
+
+function relativeTime(ts){
+  if(!ts || !ts.toDate) return '剛剛';
+  const diffMs = Date.now() - ts.toDate().getTime();
+  const min = Math.floor(diffMs/60000);
+  if(min < 1) return '剛剛';
+  if(min < 60) return `${min} 分鐘前`;
+  const hr = Math.floor(min/60);
+  if(hr < 24) return `${hr} 小時前`;
+  const day = Math.floor(hr/24);
+  if(day < 7) return `${day} 天前`;
+  const d = ts.toDate();
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+function formatDate(d){
+  const dt = new Date(d+'T00:00:00');
+  const days = ['週日','週一','週二','週三','週四','週五','週六'];
+  return `${dt.getMonth()+1}月${dt.getDate()}日 · ${days[dt.getDay()]}`;
+}
+function formatDateShort(d){
+  const dt = new Date(d+'T00:00:00');
+  return `${dt.getMonth()+1}/${dt.getDate()}`;
+}
+
+root.innerHTML = `<div class="loading">載入中…</div>`;
+</script>
+</body>
+</html>
