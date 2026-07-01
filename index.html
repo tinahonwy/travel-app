@@ -394,9 +394,13 @@ function userAvatar(uid){
 
 function listenItin(){
   if(unsubItin) unsubItin();
-  unsubItin = db.collection('itinerary').orderBy('date','asc').orderBy('time','asc').limit(500)
+  unsubItin = db.collection('itinerary').orderBy('date','asc').limit(500)
     .onSnapshot(snap=>{
       allItin = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      allItin.sort((a,b)=>{
+        if(a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return (a.time||'') < (b.time||'') ? -1 : (a.time||'') > (b.time||'') ? 1 : 0;
+      });
       if(activeTab==='itin') renderItinPage();
     }, err=>{ console.error(err); toast('讀取行程時發生問題'); });
 }
