@@ -4,7 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>一起去旅行</title>
+<link rel="icon" type="image/png" href="./JLOGO.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./JLOGO.png">
 <meta name="apple-mobile-web-app-title" content="一起去旅行">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans+TC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
@@ -697,7 +701,12 @@ function renderItinPage(){
     <div class="form-card">
       <div class="grid2">
         <div class="field compact"><label>日期</label><div class="date-wrap"><input type="date" id="i_date" value="${e? e.date : todayStr()}"></div></div>
-        <div class="field compact"><label>時間（24小時制）</label><input type="text" id="i_time" placeholder="例如 14:30" inputmode="numeric" maxlength="5" value="${e? (e.time||'') : ''}"></div>
+        <div class="field compact"><label>時間（24小時制）</label>
+          <div class="grid2" style="gap:8px;">
+            <select id="i_hour"></select>
+            <select id="i_min"></select>
+          </div>
+        </div>
       </div>
       <div class="field compact"><label>行程標題</label><input type="text" id="i_title" placeholder="例如：淺草寺參拜" value="${e? esc(e.title||'') : ''}"></div>
       <div class="field compact"><label>地點（選填，可貼地圖連結）</label><input type="text" id="i_loc" placeholder="例如：東京都台東區淺草2-3-1" value="${e? esc(e.location||'') : ''}"></div>
@@ -710,12 +719,18 @@ function renderItinPage(){
   const cancelBtn = document.getElementById('cancelEditItin');
   if(cancelBtn) cancelBtn.onclick = ()=>{ editingItin=null; renderItinPage(); };
   document.getElementById('submitItin').onclick = submitItin;
-  const timeInput = document.getElementById('i_time');
-  timeInput.oninput = ()=>{
-    let v = timeInput.value.replace(/[^\d]/g,'').slice(0,4);
-    if(v.length>=3) v = v.slice(0,2)+':'+v.slice(2);
-    timeInput.value = v;
-  };
+  const prefTime = e ? (e.time||'') : '';
+  const [prefH, prefM] = prefTime.split(':');
+  const hourSel = document.getElementById('i_hour');
+  const minSel = document.getElementById('i_min');
+  hourSel.innerHTML = `<option value="">時</option>` + Array.from({length:24},(_,h)=>{
+    const v = String(h).padStart(2,'0');
+    return `<option value="${v}" ${prefH===v?'selected':''}>${v} 時</option>`;
+  }).join('');
+  minSel.innerHTML = `<option value="">分</option>` + Array.from({length:12},(_,i)=>i*5).map(m=>{
+    const v = String(m).padStart(2,'0');
+    return `<option value="${v}" ${prefM===v?'selected':''}>${v} 分</option>`;
+  }).join('');
   renderItinList();
 }
 
@@ -771,16 +786,14 @@ async function submitItin(){
   const title = document.getElementById('i_title').value.trim();
   if(!date){ toast('請選擇日期'); return; }
   if(!title){ toast('請輸入行程標題'); return; }
-  const timeVal = document.getElementById('i_time').value.trim();
-  if(timeVal && !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeVal)){
-    toast('時間格式請用 24 小時制，例如 14:30');
-    return;
-  }
+  const hourVal = document.getElementById('i_hour').value;
+  const minVal = document.getElementById('i_min').value;
+  const timeVal = (hourVal && minVal) ? `${hourVal}:${minVal}` : '';
   const isEdit = !!editingItin;
   btn.disabled = true; btn.textContent = isEdit? '更新中…' : '儲存中…';
   const data = {
     uid: currentUser.uid, name: currentProfile.name,
-    date, time: document.getElementById('i_time').value || '',
+    date, time: timeVal,
     title, location: document.getElementById('i_loc').value.trim(),
     note: document.getElementById('i_note').value.trim(),
   };
