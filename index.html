@@ -426,6 +426,11 @@ async function renderTripsView(){
       <h1>我的旅行</h1>
       <p class="subtitle">選一個行程繼續規劃，或建立新的旅行</p>
 
+      <h2 style="margin-bottom:12px">行程清單</h2>
+      <div id="tripList"><div class="empty-state">載入中…</div></div>
+
+      <div class="wave-divider" style="margin:24px 0"></div>
+
       <div class="card">
         <h2>建立新行程</h2>
         <form id="createTripForm">
@@ -449,9 +454,6 @@ async function renderTripsView(){
           <button type="submit" class="btn btn-outline">加入</button>
         </form>
       </div>
-
-      <h2>行程清單</h2>
-      <div id="tripList"><div class="empty-state">載入中…</div></div>
     </div>
   `;
 
@@ -496,12 +498,12 @@ async function renderTripsView(){
     return;
   }
   listEl.innerHTML = trips.map(t=>`
-    <div class="card card-row" style="cursor:pointer" data-trip-id="${t.id}">
+    <div class="card card-row" style="cursor:pointer;border-left:4px solid var(--vermillion);padding:22px 20px;" data-trip-id="${t.id}">
       <div>
-        <h2 style="margin-bottom:2px">${esc(t.name)}</h2>
+        <h1 style="margin-bottom:4px;font-size:22px;">${esc(t.name)}</h1>
         <p class="subtitle" style="margin:0">${t.startDate} → ${t.endDate} · ${t.members.length} 位成員</p>
       </div>
-      <span class="btn btn-outline" style="pointer-events:none">查看</span>
+      <span class="btn btn-accent" style="pointer-events:none;flex-shrink:0">查看 →</span>
     </div>
   `).join('');
   listEl.querySelectorAll('[data-trip-id]').forEach(card=>{
