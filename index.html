@@ -160,6 +160,18 @@ function fmt(n){ return Number(n||0).toLocaleString('zh-TW', {maximumFractionDig
 function nameOf(uid){ const m = currentMembers.find(m=>m.uid===uid); return m ? m.displayName : '未知成員'; }
 function isMe(uid){ return currentUser && uid === currentUser.uid; }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
+function hourOptionsHTML(){
+  return Array.from({length:24},(_,h)=>{
+    const v = String(h).padStart(2,'0');
+    return `<option value="${v}">${v} 時</option>`;
+  }).join('');
+}
+function minOptionsHTML(){
+  return Array.from({length:12},(_,i)=>i*5).map(m=>{
+    const v = String(m).padStart(2,'0');
+    return `<option value="${v}">${v} 分</option>`;
+  }).join('');
+}
 function showMsg(boxId, text, type){
   const box = document.getElementById(boxId);
   if(!box) return;
@@ -464,7 +476,8 @@ async function renderItineraryTab(el){
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
       <form class="add-item-form" data-add-item-for="${d.id}" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-        <input type="time" class="i-time" style="width:110px;padding:8px;border:1px solid var(--border);border-radius:8px;" required>
+        <select class="i-hour" style="padding:8px;border:1px solid var(--border);border-radius:8px;">${hourOptionsHTML()}</select>
+        <select class="i-min" style="padding:8px;border:1px solid var(--border);border-radius:8px;">${minOptionsHTML()}</select>
         <input type="text" class="i-title" placeholder="要去哪裡／做什麼" style="flex:1;min-width:140px;padding:8px;border:1px solid var(--border);border-radius:8px;" required>
         <button type="submit" class="btn btn-outline">加入</button>
       </form>
@@ -488,8 +501,10 @@ async function renderItineraryTab(el){
       e.preventDefault();
       const dayId = form.dataset.addItemFor;
       const card = form.closest('.day-block');
+      const hourVal = card.querySelector('.i-hour').value;
+      const minVal = card.querySelector('.i-min').value;
       const item = {
-        time: card.querySelector('.i-time').value,
+        time: `${hourVal}:${minVal}`,
         title: card.querySelector('.i-title').value.trim(),
         note: card.querySelector('.i-note').value.trim(),
         link: card.querySelector('.i-link').value.trim()
