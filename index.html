@@ -614,18 +614,52 @@ async function renderItineraryTab(el){
         <button class="btn-danger" data-del-day="${d.id}">刪除整天</button>
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
-      <form class="add-item-form" data-add-item-for="${d.id}" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-        <select class="i-hour" style="padding:8px;border:1px solid var(--border);border-radius:8px;">${hourOptionsHTML()}</select>
-        <select class="i-min" style="padding:8px;border:1px solid var(--border);border-radius:8px;">${minOptionsHTML()}</select>
-        <input type="text" class="i-title" placeholder="要去哪裡／做什麼" style="flex:1;min-width:140px;padding:8px;border:1px solid var(--border);border-radius:8px;" required>
-        <button type="submit" class="btn btn-outline">加入</button>
+      <button type="button" class="btn btn-outline btn-block toggle-add-item" data-day-id="${d.id}" style="margin-top:12px">＋ 新增行程項目</button>
+      <form class="add-item-form hidden" data-add-item-for="${d.id}" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
+        <div class="field-row">
+          <div class="field" style="flex:0 0 96px">
+            <label>時</label>
+            <select class="i-hour">${hourOptionsHTML()}</select>
+          </div>
+          <div class="field" style="flex:0 0 96px">
+            <label>分</label>
+            <select class="i-min">${minOptionsHTML()}</select>
+          </div>
+          <div class="field" style="flex:2">
+            <label>要去哪裡／做什麼</label>
+            <input type="text" class="i-title" placeholder="例如：道頓堀逛街" required>
+          </div>
+        </div>
+        <div class="field">
+          <label>備註（選填）</label>
+          <input type="text" class="i-note" placeholder="例如：記得先訂位">
+        </div>
+        <div class="field">
+          <label>連結（選填）</label>
+          <input type="url" class="i-link" placeholder="Google Maps、訂位頁面…">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button type="submit" class="btn btn-accent" style="flex:1">加入這筆行程</button>
+          <button type="button" class="btn btn-outline cancel-add-item" data-day-id="${d.id}">取消</button>
+        </div>
       </form>
-      <div class="field" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
-        <input type="text" class="i-note" placeholder="備註（選填）" style="flex:1;min-width:120px;padding:8px;border:1px solid var(--border);border-radius:8px;">
-        <input type="url" class="i-link" placeholder="連結（選填）" style="flex:1;min-width:120px;padding:8px;border:1px solid var(--border);border-radius:8px;">
-      </div>
     </div>
   `).join('');
+
+  daysListEl.querySelectorAll('.toggle-add-item').forEach(btn=>{
+    btn.onclick = ()=>{
+      const card = btn.closest('.day-block');
+      card.querySelector('.add-item-form').classList.remove('hidden');
+      btn.classList.add('hidden');
+    };
+  });
+  daysListEl.querySelectorAll('.cancel-add-item').forEach(btn=>{
+    btn.onclick = ()=>{
+      const card = btn.closest('.day-block');
+      card.querySelector('.add-item-form').classList.add('hidden');
+      card.querySelector('.toggle-add-item').classList.remove('hidden');
+    };
+  });
 
   daysListEl.querySelectorAll('[data-del-day]').forEach(btn=>{
     btn.onclick = async ()=>{
@@ -650,6 +684,8 @@ async function renderItineraryTab(el){
       };
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').add(item);
       form.reset();
+      form.classList.add('hidden');
+      card.querySelector('.toggle-add-item').classList.remove('hidden');
       renderItemsFor(dayId);
     };
   });
