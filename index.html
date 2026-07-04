@@ -32,8 +32,27 @@
   .top-bar .user-info{display:flex;align-items:center;gap:12px;font-size:13px;opacity:.9;}
   .top-bar button.ghost{background:transparent;border:1px solid rgba(247,243,234,.4);color:var(--paper);padding:6px 14px;border-radius:999px;font-size:13px;}
   .top-bar button.ghost:hover{border-color:var(--paper);}
+  .profile-trigger{display:flex;align-items:center;gap:8px;background:none;border:none;color:var(--paper);font-family:var(--font-body);font-size:13px;cursor:pointer;padding:0;}
+  .profile-trigger:hover{opacity:.85;}
+  .avatar-mini{width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(247,243,234,.5);}
+  .avatar-mini-fallback{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:12px;font-weight:600;color:#fff;}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(27,58,75,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+  .modal-card{background:var(--paper-card);border-radius:18px;padding:24px;max-width:360px;width:100%;margin:auto;box-shadow:0 10px 40px rgba(27,58,75,.25);}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+  .modal-head h3{margin:0;}
+  .modal-close{background:none;border:none;font-size:16px;color:var(--muted);cursor:pointer;padding:2px 6px;}
+  .modal-close:hover{color:var(--vermillion);}
+  .avatar-edit{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:18px;}
+  .avatar-preview{width:88px;height:88px;border-radius:50%;background:var(--vermillion-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:30px;font-weight:700;color:var(--vermillion);font-family:var(--font-display);}
+  .avatar-preview img{width:100%;height:100%;object-fit:cover;}
+  .color-picker{display:flex;flex-wrap:wrap;gap:10px;padding:2px 0;}
+  .color-swatch{width:32px;height:32px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;position:relative;}
+  .color-swatch.selected{border-color:var(--ink);box-shadow:0 0 0 2px var(--paper-card),0 0 0 4px var(--ink);}
+  .color-swatch.taken{opacity:.25;cursor:not-allowed;}
 
   .container{max-width:720px;margin:0 auto;padding:28px 18px 70px;}
+  .container.has-tabbar{padding-bottom:90px;}
 
   h1,h2,h3{font-family:var(--font-display);font-weight:600;margin:0 0 6px;}
   h1{font-size:26px;} h2{font-size:19px;}
@@ -59,9 +78,11 @@
   .btn-danger{background:transparent;color:var(--danger);font-size:12.5px;padding:4px 8px;border:none;}
   .btn-block{width:100%;}
 
-  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto;}
-  .tab-btn{background:transparent;border:none;padding:10px 14px;font-size:13.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;}
-  .tab-btn.active{color:var(--vermillion);border-bottom-color:var(--vermillion);font-weight:600;}
+  .tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--paper-card);border-top:1px solid var(--border);display:flex;justify-content:center;z-index:60;box-shadow:0 -2px 12px rgba(27,58,75,.06);}
+  .tabbar-inner{max-width:720px;width:100%;display:flex;}
+  .tab-btn{flex:1;background:transparent;border:none;padding:10px 4px 8px;font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;white-space:nowrap;}
+  .tab-btn .tab-ic{font-size:19px;}
+  .tab-btn.active{color:var(--vermillion);font-weight:600;}
 
   .day-block{margin-bottom:18px;}
   .day-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;}
@@ -115,7 +136,7 @@
 <div id="topBar" class="top-bar hidden">
   <div class="brand"><span class="stamp">旅</span> 一起去日本</div>
   <div class="user-info">
-    <span id="topBarUserEmail"></span>
+    <button class="profile-trigger" id="profileBtn"></button>
     <button id="logoutBtn" class="ghost">登出</button>
   </div>
 </div>
@@ -150,7 +171,123 @@ let authMode = 'login';
 
 const root = document.getElementById('root');
 const topBar = document.getElementById('topBar');
-const topBarUserEmail = document.getElementById('topBarUserEmail');
+const profileBtn = document.getElementById('profileBtn');
+
+// ------------------------------------------------------------
+// 大頭貼 / 代表色
+// ------------------------------------------------------------
+const PALETTE = ["#C1440E","#1B3A4B","#6E7F3C","#8B5E3C","#3E7CB1","#B3261E","#4C8C6B","#8B5A82"];
+function colorOf(profile){
+  if(profile && profile.color) return profile.color;
+  const name = (profile && (profile.displayName||profile.email)) || '';
+  let h = 0;
+  for(let i=0;i<name.length;i++){ h = (h*31 + name.charCodeAt(i)) % 997; }
+  return PALETTE[h % PALETTE.length];
+}
+function renderTopBar(){
+  if(!currentProfile) return;
+  const color = colorOf(currentProfile);
+  profileBtn.innerHTML = currentProfile.avatar
+    ? `<img class="avatar-mini" src="${currentProfile.avatar}">`
+    : `<span class="avatar-mini-fallback" style="background:${color}">${esc((currentProfile.displayName||'?').slice(0,1))}</span>`;
+  profileBtn.innerHTML += `<span>${esc(currentProfile.displayName || currentProfile.email)}</span>`;
+}
+function openProfileModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const initialColor = colorOf(currentProfile);
+  const takenColors = currentMembers.filter(m=>!isMe(m.uid) && m.color).map(m=>m.color);
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>編輯個人資料</h3>
+        <button class="modal-close" id="closeProfileModal">✕</button>
+      </div>
+      <div class="avatar-edit">
+        <div class="avatar-preview" id="avatarPreview">
+          ${currentProfile.avatar ? `<img src="${currentProfile.avatar}">` : `<span>${esc((currentProfile.displayName||'?').slice(0,1))}</span>`}
+        </div>
+        <button class="btn btn-outline" id="chooseAvatarBtn" style="width:auto;padding:6px 16px;font-size:13px;">上傳頭像</button>
+        <input type="file" id="avatarInput" accept="image/*" style="display:none">
+      </div>
+      <div class="field">
+        <label>暱稱</label>
+        <input type="text" id="profileNameInput" value="${esc(currentProfile.displayName||'')}" maxlength="20">
+      </div>
+      <div class="field">
+        <label>代表色</label>
+        <div class="color-picker" id="colorPicker">
+          ${PALETTE.map(c=>{
+            const isMine = c===initialColor;
+            const disabled = takenColors.includes(c) && !isMine;
+            return `<button type="button" class="color-swatch ${isMine?'selected':''} ${disabled?'taken':''}" data-color="${c}" style="background:${c}" ${disabled?'disabled title="這個顏色已經被其他團員用了"':''}></button>`;
+          }).join('')}
+        </div>
+      </div>
+      <button class="btn btn-accent btn-block" id="saveProfileBtn" style="margin-top:8px">儲存</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  let newAvatar = currentProfile.avatar || null;
+  let selectedColor = initialColor;
+
+  document.getElementById('closeProfileModal').onclick = ()=>overlay.remove();
+  overlay.onclick = (ev)=>{ if(ev.target===overlay) overlay.remove(); };
+
+  document.getElementById('chooseAvatarBtn').onclick = ()=>document.getElementById('avatarInput').click();
+  document.getElementById('avatarInput').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 320;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale;
+        canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        newAvatar = canvas.toDataURL('image/jpeg', 0.82);
+        document.getElementById('avatarPreview').innerHTML = `<img src="${newAvatar}">`;
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  document.getElementById('colorPicker').querySelectorAll('.color-swatch:not([disabled])').forEach(sw=>{
+    sw.onclick = ()=>{
+      selectedColor = sw.dataset.color;
+      document.getElementById('colorPicker').querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected'));
+      sw.classList.add('selected');
+    };
+  });
+
+  document.getElementById('saveProfileBtn').onclick = async ()=>{
+    const btn = document.getElementById('saveProfileBtn');
+    const displayName = document.getElementById('profileNameInput').value.trim();
+    if(!displayName){ alert('請輸入暱稱'); return; }
+    btn.disabled = true; btn.textContent = '儲存中…';
+    try{
+      await db.collection('users').doc(currentUser.uid).update({
+        displayName, avatar: newAvatar || null, color: selectedColor
+      });
+      currentProfile.displayName = displayName;
+      currentProfile.avatar = newAvatar || null;
+      currentProfile.color = selectedColor;
+      const meInMembers = currentMembers.find(m=>isMe(m.uid));
+      if(meInMembers){ meInMembers.displayName = displayName; meInMembers.avatar = newAvatar || null; meInMembers.color = selectedColor; }
+      renderTopBar();
+      overlay.remove();
+      if(currentTrip) renderTripDetailView(); else renderTripsView();
+    }catch(e){
+      alert('更新失敗：'+e.message);
+      btn.disabled = false; btn.textContent = '儲存';
+    }
+  };
+}
+profileBtn.addEventListener('click', ()=>{ if(currentProfile) openProfileModal(); });
 
 // ------------------------------------------------------------
 // 共用小工具
@@ -201,13 +338,13 @@ auth.onAuthStateChanged(async (user)=>{
   currentUser = user;
   if(user){
     topBar.classList.remove('hidden');
-    topBarUserEmail.textContent = user.email;
     try{
       const snap = await db.collection('users').doc(user.uid).get();
       currentProfile = snap.exists ? snap.data() : {email:user.email, displayName:user.email.split('@')[0]};
     }catch(e){
       currentProfile = {email:user.email, displayName:user.email.split('@')[0]};
     }
+    renderTopBar();
     currentTrip = null;
     await renderTripsView();
   } else {
@@ -390,7 +527,7 @@ async function openTrip(tripId){
 // ==============================================================
 async function renderTripDetailView(){
   root.innerHTML = `
-    <div class="container">
+    <div class="container has-tabbar">
       <button id="backBtn" class="btn btn-outline" style="margin-bottom:16px">← 回到我的旅行</button>
       <span class="eyebrow">${currentTrip.startDate} → ${currentTrip.endDate}</span>
       <h1>${esc(currentTrip.name)}</h1>
@@ -398,14 +535,14 @@ async function renderTripDetailView(){
         行程代碼：<strong>${currentTrip.id}</strong>
         <button id="copyCodeBtn" class="btn-danger" style="color:var(--ink-soft)">複製</button>
       </div>
-      <div class="tabs">
-        <button class="tab-btn" data-tab="itinerary">行程規劃</button>
-        <button class="tab-btn" data-tab="expenses">一起出錢</button>
-        <button class="tab-btn" data-tab="personal">我的記帳</button>
-        <button class="tab-btn" data-tab="members">團員</button>
-      </div>
       <div id="tabContent"></div>
     </div>
+    <div class="tabbar"><div class="tabbar-inner">
+      <button class="tab-btn" data-tab="itinerary"><span class="tab-ic">🗓️</span>行程規劃</button>
+      <button class="tab-btn" data-tab="expenses"><span class="tab-ic">💰</span>一起出錢</button>
+      <button class="tab-btn" data-tab="personal"><span class="tab-ic">📝</span>我的記帳</button>
+      <button class="tab-btn" data-tab="members"><span class="tab-ic">👥</span>團員</button>
+    </div></div>
   `;
   document.getElementById('backBtn').onclick = ()=>{ currentTrip=null; renderTripsView(); };
   document.getElementById('copyCodeBtn').onclick = ()=>{
