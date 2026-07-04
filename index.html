@@ -135,7 +135,7 @@
 
   .trip-code{font-family:var(--font-mono);font-size:12.5px;background:var(--paper);border:1px dashed var(--border);padding:6px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:8px;color:var(--ink-soft);margin-bottom:18px;max-width:100%;flex-wrap:wrap;word-break:break-all;}
 
-  @media (max-width:480px){
+  @media (max-width:600px){
     .container{padding:20px 12px 60px;}
     .field-row{flex-direction:column;gap:0;}
   }
@@ -594,10 +594,10 @@ async function renderItineraryTab(el){
   el.innerHTML = `
     <div class="card">
       <h2>新增一天</h2>
-      <form id="addDayForm" class="field-row" style="align-items:flex-end">
+      <form id="addDayForm">
         <div class="field"><label>日期</label><input type="date" id="dayDate" required></div>
-        <div class="field" style="flex:2"><label>標題</label><input type="text" id="dayTitle" placeholder="例如：第一天・大阪" required></div>
-        <button type="submit" class="btn btn-accent">新增</button>
+        <div class="field"><label>標題</label><input type="text" id="dayTitle" placeholder="例如：第一天・大阪" required></div>
+        <button type="submit" class="btn btn-accent btn-block">新增這一天</button>
       </form>
     </div>
     <div id="daysList"></div>
