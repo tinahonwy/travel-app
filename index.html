@@ -94,6 +94,9 @@
   .day-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;}
   .date-tag{font-family:var(--font-mono);font-size:11.5px;color:var(--vermillion);background:var(--vermillion-soft);padding:3px 8px;border-radius:6px;margin-right:8px;}
   .item-row{display:flex;gap:12px;padding:9px 0;border-bottom:1px dashed var(--border);}
+  .edit-btn{background:transparent;color:var(--matcha);font-size:12px;padding:2px 4px;border:none;cursor:pointer;text-decoration:underline;}
+  .item-actions{display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;}
+  .edit-item-form{background:var(--paper);border:1px dashed var(--border);border-radius:10px;padding:12px;margin:6px 0;}
   .item-row:last-child{border-bottom:none;}
   .item-time{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);width:44px;flex-shrink:0;padding-top:2px;}
   .item-body{flex:1;min-width:0;}
@@ -547,6 +550,7 @@ async function renderTripDetailView(){
     </div>
     <div class="tabbar"><div class="tabbar-inner">
       <button class="tab-btn" data-tab="itinerary"><span class="tab-ic">🗓️</span>行程規劃</button>
+      <button class="tab-btn" data-tab="overview"><span class="tab-ic">📋</span>行程總覽</button>
       <button class="tab-btn" data-tab="expenses"><span class="tab-ic">💰</span>一起出錢</button>
       <button class="tab-btn" data-tab="personal"><span class="tab-ic">📝</span>我的記帳</button>
       <button class="tab-btn" data-tab="members"><span class="tab-ic">👥</span>團員</button>
@@ -576,6 +580,7 @@ async function renderTabContent(){
   const el = document.getElementById('tabContent');
   el.innerHTML = `<div class="empty-state">載入中…</div>`;
   if(activeTab==='itinerary') return renderItineraryTab(el);
+  if(activeTab==='overview') return renderOverviewTab(el);
   if(activeTab==='expenses') return renderExpensesTab(el);
   if(activeTab==='personal') return renderPersonalTab(el);
   if(activeTab==='members') return renderMembersTab(el);
@@ -723,6 +728,96 @@ async function renderItemsFor(dayId){
     btn.onclick = async ()=>{
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(btn.dataset.delItem).delete();
       renderItemsFor(dayId);
+    };
+  });
+}
+
+// ---------------- 行程總覽（純看行程，但仍可編輯/刪除） ----------------
+async function renderOverviewTab(el){
+  const snap = await db.collection('trips').doc(currentTrip.id).collection('days').orderBy('date').get();
+  const days = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  if(days.length===0){
+    el.innerHTML = `<div class="empty-state">還沒有安排任何行程，先到「行程規劃」新增一天吧</div>`;
+    return;
+  }
+  el.innerHTML = days.map(d=>`
+    <div class="card">
+      <div class="day-header">
+        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
+      </div>
+      <div class="items-container" data-overview-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
+    </div>
+  `).join('');
+  for(const d of days){ renderOverviewItemsFor(d.id); }
+}
+
+async function renderOverviewItemsFor(dayId){
+  const container = document.querySelector(`[data-overview-items-for="${dayId}"]`);
+  if(!container) return;
+  const snap = await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').orderBy('time').get();
+  const items = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  if(items.length===0){
+    container.innerHTML = `<div class="empty-state" style="padding:14px 0">這天還沒有排行程</div>`;
+    return;
+  }
+  container.innerHTML = items.map(it=>`
+    <div class="item-row" data-item-row="${it.id}">
+      <div class="item-time">${it.time||''}</div>
+      <div class="item-body">
+        <div class="item-title">${esc(it.title)}</div>
+        ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
+        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">相關連結 ↗</a>` : ''}
+      </div>
+      <div class="item-actions">
+        <button class="edit-btn" data-ov-edit="${it.id}">編輯</button>
+        <button class="btn-danger" data-ov-del="${it.id}">刪除</button>
+      </div>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('[data-ov-del]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      if(!confirm('確定要刪除這筆行程嗎？')) return;
+      await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(btn.dataset.ovDel).delete();
+      renderOverviewItemsFor(dayId);
+    };
+  });
+
+  container.querySelectorAll('[data-ov-edit]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const item = items.find(x=>x.id===btn.dataset.ovEdit);
+      const row = container.querySelector(`[data-item-row="${item.id}"]`);
+      const [h, m] = (item.time||'00:00').split(':');
+      row.outerHTML = `
+        <div class="edit-item-form" data-item-row="${item.id}">
+          <div class="field-row">
+            <div class="field" style="flex:0 0 96px"><label>時</label><select class="ov-hour">${hourOptionsHTML().replace(`value="${h}"`, `value="${h}" selected`)}</select></div>
+            <div class="field" style="flex:0 0 96px"><label>分</label><select class="ov-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
+            <div class="field" style="flex:2"><label>要去哪裡／做什麼</label><input type="text" class="ov-title" value="${esc(item.title)}" required></div>
+          </div>
+          <div class="field"><label>備註（選填）</label><input type="text" class="ov-note" value="${esc(item.note||'')}"></div>
+          <div class="field"><label>連結（選填）</label><input type="url" class="ov-link" value="${esc(item.link||'')}"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-accent ov-save" style="flex:1">儲存</button>
+            <button class="btn btn-outline ov-cancel">取消</button>
+          </div>
+        </div>
+      `;
+      const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
+      formEl.querySelector('.ov-cancel').onclick = ()=>renderOverviewItemsFor(dayId);
+      formEl.querySelector('.ov-save').onclick = async ()=>{
+        const hourVal = formEl.querySelector('.ov-hour').value;
+        const minVal = formEl.querySelector('.ov-min').value;
+        const title = formEl.querySelector('.ov-title').value.trim();
+        if(!title){ alert('請輸入標題'); return; }
+        await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(item.id).update({
+          time: `${hourVal}:${minVal}`,
+          title,
+          note: formEl.querySelector('.ov-note').value.trim(),
+          link: formEl.querySelector('.ov-link').value.trim()
+        });
+        renderOverviewItemsFor(dayId);
+      };
     };
   });
 }
