@@ -71,6 +71,9 @@
   .field{margin-bottom:14px;min-width:0;}
   .field label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:5px;}
   .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);}
+  .date-wrap{position:relative;overflow:hidden;border-radius:8px;border:1px solid var(--border);background:var(--paper);}
+  .date-wrap input[type="date"]{border:none;background:transparent;width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;font-size:14px;color:var(--ink);display:block;}
+  .date-wrap input[type="date"]:focus{outline:none;}
   .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--ink-soft);outline-offset:1px;}
   .field-row{display:flex;gap:12px;}
   .field-row .field{flex:1;}
@@ -448,8 +451,8 @@ async function renderTripsView(){
             <input type="text" id="tripName" placeholder="例如：2026 關西賞楓" required>
           </div>
           <div class="field-row">
-            <div class="field"><label>出發日</label><input type="date" id="tripStart" required></div>
-            <div class="field"><label>回程日</label><input type="date" id="tripEnd" required></div>
+            <div class="field"><label>出發日</label><div class="date-wrap"><input type="date" id="tripStart" required></div></div>
+            <div class="field"><label>回程日</label><div class="date-wrap"><input type="date" id="tripEnd" required></div></div>
           </div>
           <button type="submit" class="btn btn-accent btn-block">建立行程</button>
         </form>
@@ -595,7 +598,7 @@ async function renderItineraryTab(el){
     <div class="card">
       <h2>新增一天</h2>
       <form id="addDayForm">
-        <div class="field"><label>日期</label><input type="date" id="dayDate" required></div>
+        <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="dayDate" required></div></div>
         <div class="field"><label>標題</label><input type="text" id="dayTitle" placeholder="例如：第一天・大阪" required></div>
         <button type="submit" class="btn btn-accent btn-block">新增這一天</button>
       </form>
@@ -888,7 +891,7 @@ async function renderExpensesTab(el){
         </div>
         <div class="field-row">
           <div class="field"><label>誰先付的</label><select id="expPayer">${memberOptions}</select></div>
-          <div class="field"><label>日期</label><input type="date" id="expDate" required></div>
+          <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="expDate" required></div></div>
         </div>
         <div class="field"><label>這筆錢由誰分攤（均分）</label>${memberCheckboxes}</div>
         <button type="submit" class="btn btn-accent btn-block">新增花費</button>
@@ -921,7 +924,7 @@ async function renderExpensesTab(el){
         </div>
         <div class="field-row">
           <div class="field"><label>金額（日圓）</label><input type="number" id="paidAmount" min="1" required></div>
-          <div class="field"><label>日期</label><input type="date" id="paidDate" required></div>
+          <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="paidDate" required></div></div>
         </div>
         <button type="submit" class="btn btn-outline btn-block">記錄這筆付款</button>
       </form>
@@ -1037,7 +1040,7 @@ async function renderPersonalTab(el){
           <div class="field" style="flex:2"><label>項目</label><input type="text" id="recTitle" placeholder="例如：藥妝戰利品" required></div>
           <div class="field"><label>金額（日圓）</label><input type="number" id="recAmount" min="1" required></div>
         </div>
-        <div class="field"><label>日期</label><input type="date" id="recDate" required></div>
+        <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="recDate" required></div></div>
         <label class="checkbox-row" style="margin-bottom:14px"><input type="checkbox" id="recPublic"> 公開這筆給其他團員看到</label>
         <button type="submit" class="btn btn-accent btn-block">新增記錄</button>
       </form>
