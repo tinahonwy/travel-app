@@ -328,6 +328,13 @@ function fmt(n){ return Number(n||0).toLocaleString('zh-TW', {maximumFractionDig
 function nameOf(uid){ const m = currentMembers.find(m=>m.uid===uid); return m ? m.displayName : '未知成員'; }
 function isMe(uid){ return currentUser && uid === currentUser.uid; }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
+const WEEKDAYS = ['日','一','二','三','四','五','六'];
+function weekdayLabel(dateStr){
+  if(!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  return '週' + WEEKDAYS[d.getDay()];
+}
 function hourOptionsHTML(){
   return Array.from({length:24},(_,h)=>{
     const v = String(h).padStart(2,'0');
@@ -615,7 +622,7 @@ async function renderTripDetailView(){
   root.innerHTML = `
     <div class="container has-tabbar">
       <button id="backBtn" class="btn btn-outline" style="margin-bottom:16px">← 回到我的旅行</button>
-      <span class="eyebrow">${currentTrip.startDate} → ${currentTrip.endDate}</span>
+      <span class="eyebrow">${currentTrip.startDate}（週${WEEKDAYS[new Date(currentTrip.startDate+'T00:00:00').getDay()]}） → ${currentTrip.endDate}（週${WEEKDAYS[new Date(currentTrip.endDate+'T00:00:00').getDay()]}）</span>
       <h1>${esc(currentTrip.name)}</h1>
       <div class="trip-code">
         行程代碼：<strong>${currentTrip.id}</strong>
@@ -696,7 +703,7 @@ async function renderItineraryTab(el){
   daysListEl.innerHTML = days.map(d=>`
     <div class="card day-block" data-day-id="${d.id}">
       <div class="day-header">
-        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
+        <div><span class="date-tag">${d.date}（${weekdayLabel(d.date)}）</span><strong>${esc(d.title)}</strong></div>
         <button class="btn-danger" data-del-day="${d.id}">刪除整天</button>
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
@@ -859,7 +866,7 @@ async function renderOverviewTab(el){
   el.innerHTML = days.map(d=>`
     <div class="card">
       <div class="day-header">
-        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
+        <div><span class="date-tag">${d.date}（${weekdayLabel(d.date)}）</span><strong>${esc(d.title)}</strong></div>
       </div>
       <div class="items-container" data-overview-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
     </div>
