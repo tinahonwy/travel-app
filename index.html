@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
-<title>一起去日本</title>
+<title>一起去旅行</title>
 <link rel="icon" type="image/png" href="./JLOGO.png">
 <link rel="apple-touch-icon" sizes="180x180" href="./JLOGO.png">
-<meta name="apple-mobile-web-app-title" content="一起去日本">
+<meta name="apple-mobile-web-app-title" content="一起去旅行">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -160,7 +160,7 @@
 </head>
 <body>
 <div id="topBar" class="top-bar hidden">
-  <div class="brand"><span class="stamp">旅</span> 一起去日本</div>
+  <div class="brand"><span class="stamp">旅</span> 一起去旅行</div>
   <div class="user-info">
     <button class="profile-trigger" id="profileBtn"></button>
     <button id="logoutBtn" class="ghost">登出</button>
@@ -398,7 +398,7 @@ function renderAuthView(){
   root.innerHTML = `
     <div class="auth-screen">
       <div class="auth-card">
-        <h1>一起去日本</h1>
+        <h1>一起去旅行</h1>
         <p class="subtitle">${authMode==='login' ? '登入你的帳號' : '建立新帳號'}</p>
         <div id="authMsgBox"></div>
         <form id="authForm">
@@ -551,9 +551,15 @@ async function openTrip(tripId){
   if(!snap.exists) return;
   currentTrip = {id:snap.id, ...snap.data()};
   currentMembers = [];
-  for(const uid of currentTrip.members){
+  const uniqueUids = [...new Set(currentTrip.members)];
+  for(const uid of uniqueUids){
     const uSnap = await db.collection('users').doc(uid).get();
-    currentMembers.push({uid, ...(uSnap.exists ? uSnap.data() : {displayName:'未知使用者'})});
+    const data = uSnap.exists ? uSnap.data() : {};
+    currentMembers.push({
+      uid,
+      ...data,
+      displayName: data.displayName || data.email || '未命名成員'
+    });
   }
   activeTab = 'itinerary';
   await renderTripDetailView();
@@ -943,7 +949,6 @@ async function renderExpensesTab(el){
   const memberCheckboxes = currentMembers.map(m=>`
     <label class="checkbox-row"><input type="checkbox" class="split-with" value="${m.uid}" checked> ${esc(m.displayName)}${isMe(m.uid)?'（我）':''}</label>
   `).join('');
-  const payMemberOptions = currentMembers.map(m=>`<option value="${m.uid}">${esc(m.displayName)}${isMe(m.uid)?'（我）':''}</option>`).join('');
 
   el.innerHTML = `
     <div class="card">
@@ -979,22 +984,6 @@ async function renderExpensesTab(el){
             </div>
           `).join('')
       }
-    </div>
-
-    <div class="card">
-      <h2>記錄一筆已付款</h2>
-      <p class="subtitle" style="margin-bottom:12px">如果朋友已經用轉帳／現金付過錢了，在這裡記一筆</p>
-      <form id="addSettlementForm">
-        <div class="field-row">
-          <div class="field"><label>付款人</label><select id="paidFrom">${payMemberOptions}</select></div>
-          <div class="field"><label>收款人</label><select id="paidTo">${payMemberOptions}</select></div>
-        </div>
-        <div class="field-row">
-          <div class="field"><label>金額（日圓）</label><input type="number" id="paidAmount" min="1" required></div>
-          <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="paidDate" required></div></div>
-        </div>
-        <button type="submit" class="btn btn-outline btn-block">記錄這筆付款</button>
-      </form>
     </div>
 
     ${paidRecords.length>0 ? `
@@ -1040,7 +1029,6 @@ async function renderExpensesTab(el){
   `;
 
   document.getElementById('expDate').value = todayStr();
-  document.getElementById('paidDate').value = todayStr();
 
   document.getElementById('addExpenseForm').onsubmit = async (e)=>{
     e.preventDefault();
@@ -1125,19 +1113,6 @@ async function renderExpensesTab(el){
       renderExpensesTab(el);
     };
   });
-
-  document.getElementById('addSettlementForm').onsubmit = async (e)=>{
-    e.preventDefault();
-    const fromId = document.getElementById('paidFrom').value;
-    const toId = document.getElementById('paidTo').value;
-    const amount = Number(document.getElementById('paidAmount').value);
-    if(fromId === toId){ alert('付款人跟收款人不能是同一個人'); return; }
-    await db.collection('trips').doc(currentTrip.id).collection('settlements').add({
-      fromId, toId, amount, date: document.getElementById('paidDate').value,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    renderExpensesTab(el);
-  };
 
   el.querySelectorAll('[data-undo-settlement]').forEach(btn=>{
     btn.onclick = async ()=>{
