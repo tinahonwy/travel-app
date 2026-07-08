@@ -364,9 +364,10 @@ function currencySelectHTML(selectedCode, extraClass, extraAttrs){
   const sel = selectedCode || 'TWD';
   return `<select class="${extraClass||''}" ${extraAttrs||''}>${CURRENCIES.map(c=>
     `<option value="${c.code}" ${c.code===sel?'selected':''}>${c.name}（${c.code}）</option>`
-  ).join('')}</select>`;
+  ).join('')}<option value="OTHER" ${sel==='OTHER'?'selected':''}>其他</option></select>`;
 }
-function fmtCurrency(amount, code){
+function fmtCurrency(amount, code, customName){
+  if(code==='OTHER') return `${esc(customName || '其他幣別')} ${fmt(amount)}`;
   const c = currencyOf(code);
   return `${c.symbol}${fmt(amount)}`;
 }
@@ -1004,6 +1005,7 @@ async function renderExpensesTab(el){
           <div class="field"><label>幣別</label>${currencySelectHTML('TWD', '', 'id="expCurrency"')}</div>
           <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" id="expRate" min="0" step="0.0001" placeholder="1" disabled></div>
         </div>
+        <div class="field hidden" id="expOtherCurrencyField"><label>幣別名稱</label><input type="text" id="expOtherCurrency" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
         <div class="field-row">
           <div class="field"><label>誰先付的</label><select id="expPayer">${memberOptions}</select></div>
           <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="expDate" required></div></div>
@@ -1064,7 +1066,7 @@ async function renderExpensesTab(el){
                 <div class="expense-meta">${exp.splitWith.length} 人分攤：${exp.splitWith.map(uid=>esc(nameOf(uid))).join('、')}</div>
               </div>
               <div style="text-align:right">
-                <div class="expense-amount">${fmtCurrency(exp.amount, exp.currency)}</div>
+                <div class="expense-amount">${fmtCurrency(exp.amount, exp.currency, exp.customCurrencyName)}</div>
                 ${exp.currency && exp.currency!=='TWD' ? `<div class="expense-meta">≈ NT$${fmt(toTWD(exp.amount, exp.currency, exp.exchangeRate))}</div>` : ''}
               </div>
             </div>
@@ -1082,10 +1084,15 @@ async function renderExpensesTab(el){
 
   const expCurrencyEl = document.getElementById('expCurrency');
   const expRateEl = document.getElementById('expRate');
+  const expOtherFieldEl = document.getElementById('expOtherCurrencyField');
+  const expOtherInputEl = document.getElementById('expOtherCurrency');
   expCurrencyEl.onchange = ()=>{
     const isTWD = expCurrencyEl.value === 'TWD';
+    const isOther = expCurrencyEl.value === 'OTHER';
     expRateEl.disabled = isTWD;
     if(isTWD) expRateEl.value = '';
+    expOtherFieldEl.classList.toggle('hidden', !isOther);
+    if(!isOther) expOtherInputEl.value = '';
   };
 
   document.getElementById('addExpenseForm').onsubmit = async (e)=>{
@@ -1095,10 +1102,12 @@ async function renderExpensesTab(el){
     const currency = expCurrencyEl.value;
     const exchangeRate = currency==='TWD' ? 1 : Number(expRateEl.value);
     if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
+    const customCurrencyName = expOtherInputEl.value.trim();
+    if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
     await db.collection('trips').doc(currentTrip.id).collection('expenses').add({
       title: document.getElementById('expTitle').value.trim(),
       amount: Number(document.getElementById('expAmount').value),
-      currency, exchangeRate,
+      currency, exchangeRate, customCurrencyName,
       payerId: document.getElementById('expPayer').value,
       date: document.getElementById('expDate').value,
       splitWith, splitType:'equal'
@@ -1134,6 +1143,7 @@ async function renderExpensesTab(el){
             <div class="field"><label>幣別</label>${currencySelectHTML(exp.currency||'TWD', 'exp-e-currency')}</div>
             <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" class="exp-e-rate" min="0" step="0.0001" value="${exp.currency && exp.currency!=='TWD' ? (exp.exchangeRate||'') : ''}" ${(!exp.currency || exp.currency==='TWD')?'disabled':''} placeholder="1"></div>
           </div>
+          <div class="field exp-e-other-field ${exp.currency==='OTHER'?'':'hidden'}"><label>幣別名稱</label><input type="text" class="exp-e-other" value="${esc(exp.customCurrencyName||'')}" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
           <div class="field-row">
             <div class="field"><label>誰先付的</label><select class="exp-e-payer">${payerOptionsEdit}</select></div>
             <div class="field"><label>日期</label><div class="date-wrap"><input type="date" class="exp-e-date" value="${exp.date}" required></div></div>
@@ -1148,10 +1158,15 @@ async function renderExpensesTab(el){
       const formEl = expenseListEl.querySelector(`[data-exp-row="${exp.id}"]`);
       const currencyEditEl = formEl.querySelector('.exp-e-currency');
       const rateEditEl = formEl.querySelector('.exp-e-rate');
+      const otherFieldEditEl = formEl.querySelector('.exp-e-other-field');
+      const otherInputEditEl = formEl.querySelector('.exp-e-other');
       currencyEditEl.onchange = ()=>{
         const isTWD = currencyEditEl.value === 'TWD';
+        const isOther = currencyEditEl.value === 'OTHER';
         rateEditEl.disabled = isTWD;
         if(isTWD) rateEditEl.value = '';
+        otherFieldEditEl.classList.toggle('hidden', !isOther);
+        if(!isOther) otherInputEditEl.value = '';
       };
       formEl.querySelector('.exp-e-cancel').onclick = ()=>renderExpensesTab(el);
       formEl.querySelector('.exp-e-save').onclick = async ()=>{
@@ -1159,15 +1174,17 @@ async function renderExpensesTab(el){
         const amount = Number(formEl.querySelector('.exp-e-amount').value);
         const currency = currencyEditEl.value;
         const exchangeRate = currency==='TWD' ? 1 : Number(rateEditEl.value);
+        const customCurrencyName = otherInputEditEl.value.trim();
         const payerId = formEl.querySelector('.exp-e-payer').value;
         const date = formEl.querySelector('.exp-e-date').value;
         const splitWith = [...formEl.querySelectorAll('.edit-split-with:checked')].map(cb=>cb.value);
         if(!title){ alert('請輸入項目名稱'); return; }
         if(!amount || amount<=0){ alert('請輸入正確的金額'); return; }
         if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
+        if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
         if(splitWith.length===0){ alert('至少要選一個人分攤這筆花費'); return; }
         await db.collection('trips').doc(currentTrip.id).collection('expenses').doc(exp.id).update({
-          title, amount, currency, exchangeRate, payerId, date, splitWith, splitType:'equal'
+          title, amount, currency, exchangeRate, customCurrencyName, payerId, date, splitWith, splitType:'equal'
         });
         renderExpensesTab(el);
       };
@@ -1217,6 +1234,7 @@ async function renderPersonalTab(el){
           <div class="field"><label>幣別</label>${currencySelectHTML('TWD', '', 'id="recCurrency"')}</div>
           <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" id="recRate" min="0" step="0.0001" placeholder="1" disabled></div>
         </div>
+        <div class="field hidden" id="recOtherCurrencyField"><label>幣別名稱</label><input type="text" id="recOtherCurrency" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
         <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="recDate" required></div></div>
         <label class="checkbox-row" style="margin-bottom:14px"><input type="checkbox" id="recPublic"> 公開這筆給其他團員看到</label>
         <button type="submit" class="btn btn-accent btn-block">新增記錄</button>
@@ -1234,7 +1252,7 @@ async function renderPersonalTab(el){
               <div class="record-meta">${r.date}</div>
             </div>
             <div style="text-align:right">
-              <div class="expense-amount">${fmtCurrency(r.amount, r.currency)}</div>
+              <div class="expense-amount">${fmtCurrency(r.amount, r.currency, r.customCurrencyName)}</div>
               ${r.currency && r.currency!=='TWD' ? `<div class="record-meta">≈ NT$${fmt(toTWD(r.amount, r.currency, r.exchangeRate))}</div>` : ''}
               <button class="btn-danger" data-toggle-record="${r.id}" data-public="${r.isPublic}">${r.isPublic?'設為不公開':'設為公開'}</button>
               <button class="btn-danger" data-del-record="${r.id}">刪除</button>
@@ -1254,10 +1272,15 @@ async function renderPersonalTab(el){
 
   const recCurrencyEl = document.getElementById('recCurrency');
   const recRateEl = document.getElementById('recRate');
+  const recOtherFieldEl = document.getElementById('recOtherCurrencyField');
+  const recOtherInputEl = document.getElementById('recOtherCurrency');
   recCurrencyEl.onchange = ()=>{
     const isTWD = recCurrencyEl.value === 'TWD';
+    const isOther = recCurrencyEl.value === 'OTHER';
     recRateEl.disabled = isTWD;
     if(isTWD) recRateEl.value = '';
+    recOtherFieldEl.classList.toggle('hidden', !isOther);
+    if(!isOther) recOtherInputEl.value = '';
   };
 
   document.getElementById('addRecordForm').onsubmit = async (e)=>{
@@ -1265,10 +1288,12 @@ async function renderPersonalTab(el){
     const currency = recCurrencyEl.value;
     const exchangeRate = currency==='TWD' ? 1 : Number(recRateEl.value);
     if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
+    const customCurrencyName = recOtherInputEl.value.trim();
+    if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
     await db.collection('trips').doc(currentTrip.id).collection('personalRecords').add({
       title: document.getElementById('recTitle').value.trim(),
       amount: Number(document.getElementById('recAmount').value),
-      currency, exchangeRate,
+      currency, exchangeRate, customCurrencyName,
       date: document.getElementById('recDate').value,
       isPublic: document.getElementById('recPublic').checked,
       userId: currentUser.uid
@@ -1302,7 +1327,7 @@ async function renderPersonalTab(el){
     html += records.map(r=>`
       <div class="record-row">
         <div><div>${esc(r.title)}</div><div class="record-meta">${r.date}</div></div>
-        <div class="expense-amount">${fmtCurrency(r.amount, r.currency)}</div>
+        <div class="expense-amount">${fmtCurrency(r.amount, r.currency, r.customCurrencyName)}</div>
       </div>
     `).join('');
   }
