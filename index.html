@@ -99,7 +99,11 @@
   .date-tag{font-family:var(--font-mono);font-size:11.5px;color:var(--vermillion);background:var(--vermillion-soft);padding:3px 8px;border-radius:6px;margin-right:8px;}
   .item-row{display:flex;gap:12px;padding:9px 0;border-bottom:1px dashed var(--border);}
   .edit-btn{background:transparent;color:var(--matcha);font-size:12px;padding:2px 4px;border:none;cursor:pointer;text-decoration:underline;}
-  .item-actions{display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;}
+  .item-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0;}
+  .item-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 16px;border-radius:999px;border:none;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;min-width:56px;}
+  .item-btn:active{transform:scale(.96);}
+  .item-btn-edit{background:#E8EFDD;color:var(--matcha);}
+  .item-btn-del{background:#FBEAE7;color:var(--danger);}
   .edit-item-form{background:var(--paper);border:1px dashed var(--border);border-radius:10px;padding:12px;margin:6px 0;}
   .item-row:last-child{border-bottom:none;}
   .item-time{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);width:44px;flex-shrink:0;padding-top:2px;}
@@ -736,8 +740,8 @@ async function renderItemsFor(dayId){
         ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
       </div>
       <div class="item-actions">
-        <button class="edit-btn" data-item-edit="${it.id}">編輯</button>
-        <button class="btn-danger" data-del-item="${it.id}">刪除</button>
+        <button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>
+        <button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>
       </div>
     </div>
   `).join('');
@@ -824,8 +828,8 @@ async function renderOverviewItemsFor(dayId){
         ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
       </div>
       <div class="item-actions">
-        <button class="edit-btn" data-ov-edit="${it.id}">編輯</button>
-        <button class="btn-danger" data-ov-del="${it.id}">刪除</button>
+        <button class="item-btn item-btn-edit" data-ov-edit="${it.id}">編輯</button>
+        <button class="item-btn item-btn-del" data-ov-del="${it.id}">刪除</button>
       </div>
     </div>
   `).join('');
