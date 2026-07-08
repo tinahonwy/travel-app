@@ -120,6 +120,10 @@
   .amount-negative{color:var(--vermillion);font-family:var(--font-mono);}
   .amount-neutral{color:var(--muted);font-family:var(--font-mono);}
   .settle-row{display:flex;align-items:center;gap:8px;font-size:13.5px;padding:7px 0;flex-wrap:wrap;}
+  .settle-check{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--matcha);cursor:pointer;user-select:none;padding:4px 10px 4px 6px;border-radius:999px;background:#E8EFDD;}
+  .settle-check input[type="checkbox"]{width:18px;height:18px;accent-color:var(--matcha);cursor:pointer;margin:0;}
+  .settle-check.disabled{background:var(--vermillion-soft);color:var(--muted);cursor:default;}
+  .settle-check.disabled input[type="checkbox"]{accent-color:var(--muted);cursor:not-allowed;}
   .settle-arrow{color:var(--muted);}
 
   .expense-row,.record-row{display:flex;justify-content:space-between;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--border);gap:10px;}
@@ -964,7 +968,10 @@ async function renderExpensesTab(el){
               <span class="settle-arrow">該付給</span>
               <strong>${esc(nameOf(s.to))}${isMe(s.to)?'（我）':''}</strong>
               <span class="amount-negative" style="margin-left:auto">¥${fmt(s.amount)}</span>
-              <button class="btn btn-outline" style="padding:5px 12px;font-size:12px" data-mark-paid data-from="${s.from}" data-to="${s.to}" data-amount="${s.amount}">標記已付款</button>
+              <label class="settle-check ${isMe(s.to)?'':'disabled'}" title="${isMe(s.to)?'':'只有收款人本人可以標記已收款'}">
+                <input type="checkbox" data-mark-paid data-from="${s.from}" data-to="${s.to}" data-amount="${s.amount}" ${isMe(s.to)?'':'disabled'}>
+                <span>${isMe(s.to) ? '已收到錢' : `等待${esc(nameOf(s.to))}確認`}</span>
+              </label>
             </div>
           `).join('')
       }
@@ -1048,10 +1055,14 @@ async function renderExpensesTab(el){
     };
   });
 
-  el.querySelectorAll('[data-mark-paid]').forEach(btn=>{
-    btn.onclick = async ()=>{
-      const fromId = btn.dataset.from, toId = btn.dataset.to, amount = Number(btn.dataset.amount);
-      if(!confirm(`確定 ${nameOf(fromId)} 已經付給 ${nameOf(toId)} ¥${fmt(amount)} 了嗎？`)) return;
+  el.querySelectorAll('[data-mark-paid]').forEach(cb=>{
+    cb.onchange = async ()=>{
+      if(!cb.checked) return;
+      const fromId = cb.dataset.from, toId = cb.dataset.to, amount = Number(cb.dataset.amount);
+      if(!confirm(`確定已經收到 ${nameOf(fromId)} 付的 ¥${fmt(amount)} 了嗎？`)){
+        cb.checked = false;
+        return;
+      }
       await db.collection('trips').doc(currentTrip.id).collection('settlements').add({
         fromId, toId, amount, date: todayStr(),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
