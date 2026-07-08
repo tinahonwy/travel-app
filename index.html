@@ -106,7 +106,8 @@
   .item-body{flex:1;min-width:0;}
   .item-title{font-weight:600;font-size:13.5px;}
   .item-note{font-size:12.5px;color:var(--muted);margin-top:2px;}
-  .item-link{font-size:11.5px;display:inline-block;margin-top:4px;}
+  .item-link{font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-top:4px;}
+  .item-link .link-ic{font-size:12px;line-height:1;}
 
   .balance-list{list-style:none;padding:0;margin:0;}
   .balance-list li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
@@ -321,6 +322,15 @@ function minOptionsHTML(){
     const v = String(m).padStart(2,'0');
     return `<option value="${v}">${v} 分</option>`;
   }).join('');
+}
+function isMapLink(url){
+  if(!url) return false;
+  return /google\.[a-z.]+\/maps|maps\.google\.|maps\.app\.goo\.gl|goo\.gl\/maps|\/maps\?|^https?:\/\/maps\./i.test(url);
+}
+function linkIconHTML(url){
+  return isMapLink(url)
+    ? '<span class="link-ic" title="Google 地圖">🗺️</span>'
+    : '<span class="link-ic" title="連結">🔗</span>';
 }
 function showMsg(boxId, text, type){
   const box = document.getElementById(boxId);
@@ -718,20 +728,61 @@ async function renderItemsFor(dayId){
     return;
   }
   container.innerHTML = items.map(it=>`
-    <div class="item-row">
+    <div class="item-row" data-item-row="${it.id}">
       <div class="item-time">${it.time||''}</div>
       <div class="item-body">
         <div class="item-title">${esc(it.title)}</div>
         ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
-        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">相關連結 ↗</a>` : ''}
+        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
       </div>
-      <button class="btn-danger" data-del-item="${it.id}">刪除</button>
+      <div class="item-actions">
+        <button class="edit-btn" data-item-edit="${it.id}">編輯</button>
+        <button class="btn-danger" data-del-item="${it.id}">刪除</button>
+      </div>
     </div>
   `).join('');
   container.querySelectorAll('[data-del-item]').forEach(btn=>{
     btn.onclick = async ()=>{
+      if(!confirm('確定要刪除這筆行程嗎？')) return;
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(btn.dataset.delItem).delete();
       renderItemsFor(dayId);
+    };
+  });
+  container.querySelectorAll('[data-item-edit]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const item = items.find(x=>x.id===btn.dataset.itemEdit);
+      const row = container.querySelector(`[data-item-row="${item.id}"]`);
+      const [h, m] = (item.time||'00:00').split(':');
+      row.outerHTML = `
+        <div class="edit-item-form" data-item-row="${item.id}">
+          <div class="field-row">
+            <div class="field" style="flex:0 0 96px"><label>時</label><select class="it-hour">${hourOptionsHTML().replace(`value="${h}"`, `value="${h}" selected`)}</select></div>
+            <div class="field" style="flex:0 0 96px"><label>分</label><select class="it-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
+            <div class="field" style="flex:2"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" required></div>
+          </div>
+          <div class="field"><label>備註（選填）</label><input type="text" class="it-note" value="${esc(item.note||'')}"></div>
+          <div class="field"><label>連結（選填）</label><input type="url" class="it-link" value="${esc(item.link||'')}"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-accent it-save" style="flex:1">儲存</button>
+            <button class="btn btn-outline it-cancel">取消</button>
+          </div>
+        </div>
+      `;
+      const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
+      formEl.querySelector('.it-cancel').onclick = ()=>renderItemsFor(dayId);
+      formEl.querySelector('.it-save').onclick = async ()=>{
+        const hourVal = formEl.querySelector('.it-hour').value;
+        const minVal = formEl.querySelector('.it-min').value;
+        const title = formEl.querySelector('.it-title').value.trim();
+        if(!title){ alert('請輸入標題'); return; }
+        await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(item.id).update({
+          time: `${hourVal}:${minVal}`,
+          title,
+          note: formEl.querySelector('.it-note').value.trim(),
+          link: formEl.querySelector('.it-link').value.trim()
+        });
+        renderItemsFor(dayId);
+      };
     };
   });
 }
@@ -770,7 +821,7 @@ async function renderOverviewItemsFor(dayId){
       <div class="item-body">
         <div class="item-title">${esc(it.title)}</div>
         ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
-        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">相關連結 ↗</a>` : ''}
+        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
       </div>
       <div class="item-actions">
         <button class="edit-btn" data-ov-edit="${it.id}">編輯</button>
