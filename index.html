@@ -128,6 +128,10 @@
 
   .expense-row,.record-row{display:flex;justify-content:space-between;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--border);gap:10px;}
   .expense-row:last-child,.record-row:last-child{border-bottom:none;}
+  .expense-block{border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;background:var(--paper);}
+  .expense-block:last-child{margin-bottom:0;}
+  .expense-block-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .expense-block .item-actions{flex-direction:row;justify-content:flex-end;margin-top:10px;}
   .expense-meta,.record-meta{font-size:11.5px;color:var(--muted);margin-top:2px;}
   .expense-amount{font-family:var(--font-mono);font-weight:600;white-space:nowrap;}
   .visibility-badge{font-size:10.5px;padding:2px 8px;border-radius:999px;margin-left:6px;}
@@ -1016,14 +1020,18 @@ async function renderExpensesTab(el){
       <h2>花費紀錄</h2>
       <div id="expenseList">
         ${expenses.length===0 ? `<div class="empty-state">還沒有任何花費紀錄</div>` : expenses.map(exp=>`
-          <div class="expense-row">
-            <div>
-              <div>${esc(exp.title)}</div>
-              <div class="expense-meta">${esc(nameOf(exp.payerId))} 先付 · ${exp.splitWith.length} 人分攤 · ${exp.date}</div>
-            </div>
-            <div style="text-align:right">
+          <div class="expense-block" data-exp-row="${exp.id}">
+            <div class="expense-block-top">
+              <div>
+                <div class="item-title">${esc(exp.title)}</div>
+                <div class="expense-meta">${esc(nameOf(exp.payerId))} 先付 · ${exp.date}</div>
+                <div class="expense-meta">${exp.splitWith.length} 人分攤：${exp.splitWith.map(uid=>esc(nameOf(uid))).join('、')}</div>
+              </div>
               <div class="expense-amount">¥${fmt(exp.amount)}</div>
-              <button class="btn-danger" data-del-expense="${exp.id}">刪除</button>
+            </div>
+            <div class="item-actions">
+              <button class="item-btn item-btn-edit" data-exp-edit="${exp.id}">編輯</button>
+              <button class="item-btn item-btn-del" data-del-expense="${exp.id}">刪除</button>
             </div>
           </div>
         `).join('')}
@@ -1048,10 +1056,57 @@ async function renderExpensesTab(el){
     renderExpensesTab(el);
   };
 
-  el.querySelectorAll('[data-del-expense]').forEach(btn=>{
+  const expenseListEl = document.getElementById('expenseList');
+
+  expenseListEl.querySelectorAll('[data-del-expense]').forEach(btn=>{
     btn.onclick = async ()=>{
+      if(!confirm('確定要刪除這筆花費紀錄嗎？')) return;
       await db.collection('trips').doc(currentTrip.id).collection('expenses').doc(btn.dataset.delExpense).delete();
       renderExpensesTab(el);
+    };
+  });
+
+  expenseListEl.querySelectorAll('[data-exp-edit]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const exp = expenses.find(x=>x.id===btn.dataset.expEdit);
+      const block = expenseListEl.querySelector(`[data-exp-row="${exp.id}"]`);
+      const payerOptionsEdit = currentMembers.map(m=>`<option value="${m.uid}" ${m.uid===exp.payerId?'selected':''}>${esc(m.displayName)}${isMe(m.uid)?'（我）':''}</option>`).join('');
+      const splitCheckboxesEdit = currentMembers.map(m=>`
+        <label class="checkbox-row"><input type="checkbox" class="edit-split-with" value="${m.uid}" ${exp.splitWith.includes(m.uid)?'checked':''}> ${esc(m.displayName)}${isMe(m.uid)?'（我）':''}</label>
+      `).join('');
+      block.outerHTML = `
+        <div class="edit-item-form" data-exp-row="${exp.id}">
+          <div class="field-row">
+            <div class="field" style="flex:2"><label>項目</label><input type="text" class="exp-e-title" value="${esc(exp.title)}" required></div>
+            <div class="field"><label>金額（日圓）</label><input type="number" class="exp-e-amount" min="1" value="${exp.amount}" required></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>誰先付的</label><select class="exp-e-payer">${payerOptionsEdit}</select></div>
+            <div class="field"><label>日期</label><div class="date-wrap"><input type="date" class="exp-e-date" value="${exp.date}" required></div></div>
+          </div>
+          <div class="field"><label>這筆錢由誰分攤</label>${splitCheckboxesEdit}</div>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn btn-accent exp-e-save" style="flex:1">儲存</button>
+            <button type="button" class="btn btn-outline exp-e-cancel">取消</button>
+          </div>
+        </div>
+      `;
+      const formEl = expenseListEl.querySelector(`[data-exp-row="${exp.id}"]`);
+      formEl.querySelector('.exp-e-cancel').onclick = ()=>renderExpensesTab(el);
+      formEl.querySelector('.exp-e-save').onclick = async ()=>{
+        const title = formEl.querySelector('.exp-e-title').value.trim();
+        const amount = Number(formEl.querySelector('.exp-e-amount').value);
+        const payerId = formEl.querySelector('.exp-e-payer').value;
+        const date = formEl.querySelector('.exp-e-date').value;
+        const splitWith = [...formEl.querySelectorAll('.edit-split-with:checked')].map(cb=>cb.value);
+        if(!title){ alert('請輸入項目名稱'); return; }
+        if(!amount || amount<=0){ alert('請輸入正確的金額'); return; }
+        if(splitWith.length===0){ alert('至少要選一個人分攤這筆花費'); return; }
+        await db.collection('trips').doc(currentTrip.id).collection('expenses').doc(exp.id).update({
+          title, amount, payerId, date, splitWith, splitType:'equal'
+        });
+        renderExpensesTab(el);
+      };
     };
   });
 
