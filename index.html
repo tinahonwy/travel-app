@@ -96,6 +96,9 @@
   .tab-btn.active{color:var(--vermillion);font-weight:600;}
 
   .day-block{margin-bottom:18px;}
+  .day-block-inner{display:flex;gap:14px;align-items:stretch;}
+  .day-weekday{writing-mode:vertical-rl;text-orientation:upright;font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--vermillion);flex-shrink:0;letter-spacing:2px;padding-top:2px;}
+  .day-content{flex:1;min-width:0;}
   .day-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;}
   .date-tag{font-family:var(--font-mono);font-size:11.5px;color:var(--vermillion);background:var(--vermillion-soft);padding:3px 8px;border-radius:6px;margin-right:8px;}
   .item-row{display:flex;gap:12px;padding:9px 0;border-bottom:1px dashed var(--border);}
@@ -347,6 +350,8 @@ function minOptionsHTML(){
     return `<option value="${v}">${v} 分</option>`;
   }).join('');
 }
+function endHourOptionsHTML(){ return `<option value="">不填沒關係</option>` + hourOptionsHTML(); }
+function endMinOptionsHTML(){ return `<option value="">不填沒關係</option>` + minOptionsHTML(); }
 function isMapLink(url){
   if(!url) return false;
   return /google\.[a-z.]+\/maps|maps\.google\.|maps\.app\.goo\.gl|goo\.gl\/maps|\/maps\?|^https?:\/\/maps\./i.test(url);
@@ -702,8 +707,11 @@ async function renderItineraryTab(el){
 
   daysListEl.innerHTML = days.map(d=>`
     <div class="card day-block" data-day-id="${d.id}">
+      <div class="day-block-inner">
+        <div class="day-weekday">${weekdayLabel(d.date)}</div>
+        <div class="day-content">
       <div class="day-header">
-        <div><span class="date-tag">${d.date}（${weekdayLabel(d.date)}）</span><strong>${esc(d.title)}</strong></div>
+        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
         <button class="btn-danger" data-del-day="${d.id}">刪除整天</button>
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
@@ -723,15 +731,14 @@ async function renderItineraryTab(el){
             <input type="text" class="i-title" placeholder="例如：道頓堀逛街" required>
           </div>
         </div>
-        <label class="checkbox-row"><input type="checkbox" class="i-has-end"> 加入結束時間</label>
-        <div class="field-row i-end-fields hidden">
+        <div class="field-row">
           <div class="field" style="flex:0 0 96px">
-            <label>結束時</label>
-            <select class="i-end-hour">${hourOptionsHTML()}</select>
+            <label>結束時（不填沒關係）</label>
+            <select class="i-end-hour">${endHourOptionsHTML()}</select>
           </div>
           <div class="field" style="flex:0 0 96px">
             <label>結束分</label>
-            <select class="i-end-min">${minOptionsHTML()}</select>
+            <select class="i-end-min">${endMinOptionsHTML()}</select>
           </div>
         </div>
         <div class="field">
@@ -747,6 +754,8 @@ async function renderItineraryTab(el){
           <button type="button" class="btn btn-outline cancel-add-item" data-day-id="${d.id}">取消</button>
         </div>
       </form>
+        </div>
+      </div>
     </div>
   `).join('');
 
@@ -774,19 +783,15 @@ async function renderItineraryTab(el){
   });
 
   daysListEl.querySelectorAll('.add-item-form').forEach(form=>{
-    const hasEndCb = form.querySelector('.i-has-end');
-    const endFieldsEl = form.querySelector('.i-end-fields');
-    hasEndCb.onchange = ()=>{
-      endFieldsEl.classList.toggle('hidden', !hasEndCb.checked);
-    };
     form.onsubmit = async (e)=>{
       e.preventDefault();
       const dayId = form.dataset.addItemFor;
       const card = form.closest('.day-block');
       const hourVal = card.querySelector('.i-hour').value;
       const minVal = card.querySelector('.i-min').value;
-      const hasEnd = card.querySelector('.i-has-end').checked;
-      const endTime = hasEnd ? `${card.querySelector('.i-end-hour').value}:${card.querySelector('.i-end-min').value}` : '';
+      const endHourVal = card.querySelector('.i-end-hour').value;
+      const endMinVal = card.querySelector('.i-end-min').value;
+      const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
       const item = {
         time: `${hourVal}:${minVal}`,
         endTime,
@@ -796,7 +801,6 @@ async function renderItineraryTab(el){
       };
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').add(item);
       form.reset();
-      endFieldsEl.classList.add('hidden');
       form.classList.add('hidden');
       card.querySelector('.toggle-add-item').classList.remove('hidden');
       renderItemsFor(dayId);
@@ -841,8 +845,7 @@ async function renderItemsFor(dayId){
       const item = items.find(x=>x.id===btn.dataset.itemEdit);
       const row = container.querySelector(`[data-item-row="${item.id}"]`);
       const [h, m] = (item.time||'00:00').split(':');
-      const hasEnd = !!item.endTime;
-      const [eh, em] = (item.endTime||'00:00').split(':');
+      const [eh, em] = item.endTime ? item.endTime.split(':') : ['',''];
       row.outerHTML = `
         <div class="edit-item-form" data-item-row="${item.id}">
           <div class="field-row">
@@ -850,10 +853,9 @@ async function renderItemsFor(dayId){
             <div class="field" style="flex:0 0 96px"><label>分</label><select class="it-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
             <div class="field" style="flex:2"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" required></div>
           </div>
-          <label class="checkbox-row"><input type="checkbox" class="it-has-end" ${hasEnd?'checked':''}> 加入結束時間</label>
-          <div class="field-row it-end-fields ${hasEnd?'':'hidden'}">
-            <div class="field" style="flex:0 0 96px"><label>結束時</label><select class="it-end-hour">${hourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`)}</select></div>
-            <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="it-end-min">${minOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`)}</select></div>
+          <div class="field-row">
+            <div class="field" style="flex:0 0 96px"><label>結束時（不填沒關係）</label><select class="it-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
+            <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="it-end-min">${em ? endMinOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`) : endMinOptionsHTML()}</select></div>
           </div>
           <div class="field"><label>備註（選填）</label><input type="text" class="it-note" value="${esc(item.note||'')}"></div>
           <div class="field"><label>連結（選填）</label><input type="url" class="it-link" value="${esc(item.link||'')}"></div>
@@ -864,15 +866,14 @@ async function renderItemsFor(dayId){
         </div>
       `;
       const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
-      const itHasEndCb = formEl.querySelector('.it-has-end');
-      const itEndFieldsEl = formEl.querySelector('.it-end-fields');
-      itHasEndCb.onchange = ()=>{ itEndFieldsEl.classList.toggle('hidden', !itHasEndCb.checked); };
       formEl.querySelector('.it-cancel').onclick = ()=>renderItemsFor(dayId);
       formEl.querySelector('.it-save').onclick = async ()=>{
         const hourVal = formEl.querySelector('.it-hour').value;
         const minVal = formEl.querySelector('.it-min').value;
         const title = formEl.querySelector('.it-title').value.trim();
-        const endTime = itHasEndCb.checked ? `${formEl.querySelector('.it-end-hour').value}:${formEl.querySelector('.it-end-min').value}` : '';
+        const endHourVal = formEl.querySelector('.it-end-hour').value;
+        const endMinVal = formEl.querySelector('.it-end-min').value;
+        const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
         await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(item.id).update({
           time: `${hourVal}:${minVal}`,
@@ -897,10 +898,15 @@ async function renderOverviewTab(el){
   }
   el.innerHTML = days.map(d=>`
     <div class="card">
+      <div class="day-block-inner">
+        <div class="day-weekday">${weekdayLabel(d.date)}</div>
+        <div class="day-content">
       <div class="day-header">
-        <div><span class="date-tag">${d.date}（${weekdayLabel(d.date)}）</span><strong>${esc(d.title)}</strong></div>
+        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
       </div>
       <div class="items-container" data-overview-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
+        </div>
+      </div>
     </div>
   `).join('');
   for(const d of days){ renderOverviewItemsFor(d.id); }
@@ -943,8 +949,7 @@ async function renderOverviewItemsFor(dayId){
       const item = items.find(x=>x.id===btn.dataset.ovEdit);
       const row = container.querySelector(`[data-item-row="${item.id}"]`);
       const [h, m] = (item.time||'00:00').split(':');
-      const hasEnd = !!item.endTime;
-      const [eh, em] = (item.endTime||'00:00').split(':');
+      const [eh, em] = item.endTime ? item.endTime.split(':') : ['',''];
       row.outerHTML = `
         <div class="edit-item-form" data-item-row="${item.id}">
           <div class="field-row">
@@ -952,10 +957,9 @@ async function renderOverviewItemsFor(dayId){
             <div class="field" style="flex:0 0 96px"><label>分</label><select class="ov-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
             <div class="field" style="flex:2"><label>要去哪裡／做什麼</label><input type="text" class="ov-title" value="${esc(item.title)}" required></div>
           </div>
-          <label class="checkbox-row"><input type="checkbox" class="ov-has-end" ${hasEnd?'checked':''}> 加入結束時間</label>
-          <div class="field-row ov-end-fields ${hasEnd?'':'hidden'}">
-            <div class="field" style="flex:0 0 96px"><label>結束時</label><select class="ov-end-hour">${hourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`)}</select></div>
-            <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="ov-end-min">${minOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`)}</select></div>
+          <div class="field-row">
+            <div class="field" style="flex:0 0 96px"><label>結束時（不填沒關係）</label><select class="ov-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
+            <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="ov-end-min">${em ? endMinOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`) : endMinOptionsHTML()}</select></div>
           </div>
           <div class="field"><label>備註（選填）</label><input type="text" class="ov-note" value="${esc(item.note||'')}"></div>
           <div class="field"><label>連結（選填）</label><input type="url" class="ov-link" value="${esc(item.link||'')}"></div>
@@ -966,15 +970,14 @@ async function renderOverviewItemsFor(dayId){
         </div>
       `;
       const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
-      const ovHasEndCb = formEl.querySelector('.ov-has-end');
-      const ovEndFieldsEl = formEl.querySelector('.ov-end-fields');
-      ovHasEndCb.onchange = ()=>{ ovEndFieldsEl.classList.toggle('hidden', !ovHasEndCb.checked); };
       formEl.querySelector('.ov-cancel').onclick = ()=>renderOverviewItemsFor(dayId);
       formEl.querySelector('.ov-save').onclick = async ()=>{
         const hourVal = formEl.querySelector('.ov-hour').value;
         const minVal = formEl.querySelector('.ov-min').value;
         const title = formEl.querySelector('.ov-title').value.trim();
-        const endTime = ovHasEndCb.checked ? `${formEl.querySelector('.ov-end-hour').value}:${formEl.querySelector('.ov-end-min').value}` : '';
+        const endHourVal = formEl.querySelector('.ov-end-hour').value;
+        const endMinVal = formEl.querySelector('.ov-end-min').value;
+        const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
         await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(item.id).update({
           time: `${hourVal}:${minVal}`,
