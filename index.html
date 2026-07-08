@@ -639,7 +639,7 @@ async function renderTripDetailView(){
       <button class="tab-btn" data-tab="itinerary"><span class="tab-ic">🗓️</span>行程規劃</button>
       <button class="tab-btn" data-tab="overview"><span class="tab-ic">📋</span>行程總覽</button>
       <button class="tab-btn" data-tab="expenses"><span class="tab-ic">💰</span>一起出錢</button>
-      <button class="tab-btn" data-tab="wishlist"><span class="tab-ic">📍</span>想去哪裡</button>
+      <button class="tab-btn" data-tab="personal"><span class="tab-ic">📝</span>我的記帳</button>
       <button class="tab-btn" data-tab="members"><span class="tab-ic">👥</span>團員</button>
     </div></div>
   `;
@@ -669,7 +669,7 @@ async function renderTabContent(){
   if(activeTab==='itinerary') return renderItineraryTab(el);
   if(activeTab==='overview') return renderOverviewTab(el);
   if(activeTab==='expenses') return renderExpensesTab(el);
-  if(activeTab==='wishlist') return renderWishlistTab(el);
+  if(activeTab==='personal') return renderPersonalTab(el);
   if(activeTab==='members') return renderMembersTab(el);
 }
 
@@ -1314,112 +1314,122 @@ async function renderExpensesTab(el){
   });
 }
 
-// ---------------- 想去哪裡（共用願望清單） ----------------
-async function renderWishlistTab(el){
-  const snap = await db.collection('trips').doc(currentTrip.id).collection('wishlist').orderBy('createdAt').get();
-  const wishes = snap.docs.map(d=>({id:d.id, ...d.data()}));
-  const pending = wishes.filter(w=>!w.isDone);
-  const done = wishes.filter(w=>w.isDone);
-  const ordered = [...pending, ...done];
-
-  function wishBlockHTML(w){
-    return `
-      <div class="expense-block" data-wish-row="${w.id}">
-        <label class="checkbox-row" style="margin-bottom:${w.note||w.link?'6px':'0'};align-items:flex-start;">
-          <input type="checkbox" data-wish-toggle="${w.id}" ${w.isDone?'checked':''} style="margin-top:3px;">
-          <span class="item-title" style="${w.isDone?'text-decoration:line-through;color:var(--muted);':''}">${esc(w.title)}</span>
-          ${w.isDone ? `<span class="visibility-badge public">已排入行程</span>` : ''}
-        </label>
-        ${w.note ? `<div class="item-note" style="margin-left:26px;">${esc(w.note)}</div>` : ''}
-        ${w.link ? `<a class="item-link" href="${esc(w.link)}" target="_blank" rel="noopener" style="margin-left:26px;">${linkIconHTML(w.link)}相關連結 ↗</a>` : ''}
-        <div class="item-actions">
-          <button class="item-btn item-btn-edit" data-wish-edit="${w.id}">編輯</button>
-          <button class="item-btn item-btn-del" data-wish-del="${w.id}">刪除</button>
-        </div>
-      </div>
-    `;
-  }
+// ---------------- 我的記帳（個人，可選公開） ----------------
+async function renderPersonalTab(el){
+  const mySnap = await db.collection('trips').doc(currentTrip.id).collection('personalRecords')
+    .where('userId','==',currentUser.uid).get();
+  const myRecords = mySnap.docs.map(d=>({id:d.id, ...d.data()}));
 
   el.innerHTML = `
     <div class="card">
-      <h2>新增想去的地方</h2>
-      <form id="addWishForm">
-        <div class="field"><label>地點名稱</label><input type="text" id="wishTitle" placeholder="例如：環球影城、一蘭拉麵" required></div>
-        <div class="field"><label>備註（選填）</label><input type="text" id="wishNote" placeholder="例如：記得先買票"></div>
-        <div class="field"><label>連結（選填）</label><input type="url" id="wishLink" placeholder="Google Maps、官網…"></div>
-        <button type="submit" class="btn btn-accent btn-block">加入清單</button>
+      <h2>新增一筆記帳</h2>
+      <form id="addRecordForm">
+        <div class="field-row">
+          <div class="field" style="flex:2"><label>項目</label><input type="text" id="recTitle" placeholder="例如：藥妝戰利品" required></div>
+          <div class="field"><label>金額</label><input type="number" id="recAmount" min="1" step="0.01" required></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>幣別</label>${currencySelectHTML('TWD', '', 'id="recCurrency"')}</div>
+          <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" id="recRate" min="0" step="0.0001" placeholder="1" disabled></div>
+        </div>
+        <div class="field hidden" id="recOtherCurrencyField"><label>幣別名稱</label><input type="text" id="recOtherCurrency" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
+        <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="recDate" required></div></div>
+        <label class="checkbox-row" style="margin-bottom:14px"><input type="checkbox" id="recPublic"> 公開這筆給其他團員看到</label>
+        <button type="submit" class="btn btn-accent btn-block">新增記錄</button>
       </form>
     </div>
 
     <div class="card">
-      <h2>想去清單</h2>
-      <p class="subtitle" style="margin-bottom:12px">排進行程後可以打勾標記，大家都看得到目前的狀態</p>
-      <div id="wishList">
-        ${ordered.length===0 ? `<div class="empty-state">還沒有任何想去的地方，新增一個開始規劃吧</div>` : ordered.map(wishBlockHTML).join('')}
+      <h2>我的記帳明細</h2>
+      <p class="subtitle">總支出：NT$${fmt(myRecords.reduce((s,r)=>s+toTWD(r.amount, r.currency, r.exchangeRate),0))}</p>
+      <div id="myRecordList">
+        ${myRecords.length===0 ? `<div class="empty-state">還沒有任何記帳</div>` : myRecords.map(r=>`
+          <div class="record-row">
+            <div>
+              <div>${esc(r.title)}<span class="visibility-badge ${r.isPublic?'public':'private'}">${r.isPublic?'公開':'只有我看得到'}</span></div>
+              <div class="record-meta">${r.date}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="expense-amount">${fmtCurrency(r.amount, r.currency, r.customCurrencyName)}</div>
+              ${r.currency && r.currency!=='TWD' ? `<div class="record-meta">≈ NT$${fmt(toTWD(r.amount, r.currency, r.exchangeRate))}</div>` : ''}
+              <button class="btn-danger" data-toggle-record="${r.id}" data-public="${r.isPublic}">${r.isPublic?'設為不公開':'設為公開'}</button>
+              <button class="btn-danger" data-del-record="${r.id}">刪除</button>
+            </div>
+          </div>
+        `).join('')}
       </div>
+    </div>
+
+    <div class="card">
+      <h2>其他團員公開的記帳</h2>
+      <div id="othersRecordList"><div class="empty-state">載入中…</div></div>
     </div>
   `;
 
-  document.getElementById('addWishForm').onsubmit = async (e)=>{
-    e.preventDefault();
-    const title = document.getElementById('wishTitle').value.trim();
-    if(!title){ return; }
-    await db.collection('trips').doc(currentTrip.id).collection('wishlist').add({
-      title,
-      note: document.getElementById('wishNote').value.trim(),
-      link: document.getElementById('wishLink').value.trim(),
-      isDone: false,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    renderWishlistTab(el);
+  document.getElementById('recDate').value = todayStr();
+
+  const recCurrencyEl = document.getElementById('recCurrency');
+  const recRateEl = document.getElementById('recRate');
+  const recOtherFieldEl = document.getElementById('recOtherCurrencyField');
+  const recOtherInputEl = document.getElementById('recOtherCurrency');
+  recCurrencyEl.onchange = ()=>{
+    const isTWD = recCurrencyEl.value === 'TWD';
+    const isOther = recCurrencyEl.value === 'OTHER';
+    recRateEl.disabled = isTWD;
+    if(isTWD) recRateEl.value = '';
+    recOtherFieldEl.classList.toggle('hidden', !isOther);
+    if(!isOther) recOtherInputEl.value = '';
   };
 
-  const wishListEl = document.getElementById('wishList');
+  document.getElementById('addRecordForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const currency = recCurrencyEl.value;
+    const exchangeRate = currency==='TWD' ? 1 : Number(recRateEl.value);
+    if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
+    const customCurrencyName = recOtherInputEl.value.trim();
+    if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
+    await db.collection('trips').doc(currentTrip.id).collection('personalRecords').add({
+      title: document.getElementById('recTitle').value.trim(),
+      amount: Number(document.getElementById('recAmount').value),
+      currency, exchangeRate, customCurrencyName,
+      date: document.getElementById('recDate').value,
+      isPublic: document.getElementById('recPublic').checked,
+      userId: currentUser.uid
+    });
+    renderPersonalTab(el);
+  };
 
-  wishListEl.querySelectorAll('[data-wish-toggle]').forEach(cb=>{
-    cb.onchange = async ()=>{
-      await db.collection('trips').doc(currentTrip.id).collection('wishlist').doc(cb.dataset.wishToggle).update({isDone: cb.checked});
-      renderWishlistTab(el);
-    };
-  });
-
-  wishListEl.querySelectorAll('[data-wish-del]').forEach(btn=>{
+  el.querySelectorAll('[data-toggle-record]').forEach(btn=>{
     btn.onclick = async ()=>{
-      if(!confirm('確定要刪除這個想去的地方嗎？')) return;
-      await db.collection('trips').doc(currentTrip.id).collection('wishlist').doc(btn.dataset.wishDel).delete();
-      renderWishlistTab(el);
+      const willBePublic = btn.dataset.public !== 'true';
+      await db.collection('trips').doc(currentTrip.id).collection('personalRecords').doc(btn.dataset.toggleRecord).update({isPublic: willBePublic});
+      renderPersonalTab(el);
+    };
+  });
+  el.querySelectorAll('[data-del-record]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      await db.collection('trips').doc(currentTrip.id).collection('personalRecords').doc(btn.dataset.delRecord).delete();
+      renderPersonalTab(el);
     };
   });
 
-  wishListEl.querySelectorAll('[data-wish-edit]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const wish = wishes.find(x=>x.id===btn.dataset.wishEdit);
-      const block = wishListEl.querySelector(`[data-wish-row="${wish.id}"]`);
-      block.outerHTML = `
-        <div class="edit-item-form" data-wish-row="${wish.id}">
-          <div class="field"><label>地點名稱</label><input type="text" class="wish-e-title" value="${esc(wish.title)}" required></div>
-          <div class="field"><label>備註（選填）</label><input type="text" class="wish-e-note" value="${esc(wish.note||'')}"></div>
-          <div class="field"><label>連結（選填）</label><input type="url" class="wish-e-link" value="${esc(wish.link||'')}"></div>
-          <div style="display:flex;gap:8px">
-            <button type="button" class="btn btn-accent wish-e-save" style="flex:1">儲存</button>
-            <button type="button" class="btn btn-outline wish-e-cancel">取消</button>
-          </div>
-        </div>
-      `;
-      const formEl = wishListEl.querySelector(`[data-wish-row="${wish.id}"]`);
-      formEl.querySelector('.wish-e-cancel').onclick = ()=>renderWishlistTab(el);
-      formEl.querySelector('.wish-e-save').onclick = async ()=>{
-        const title = formEl.querySelector('.wish-e-title').value.trim();
-        if(!title){ alert('請輸入地點名稱'); return; }
-        await db.collection('trips').doc(currentTrip.id).collection('wishlist').doc(wish.id).update({
-          title,
-          note: formEl.querySelector('.wish-e-note').value.trim(),
-          link: formEl.querySelector('.wish-e-link').value.trim()
-        });
-        renderWishlistTab(el);
-      };
-    };
-  });
+  const othersEl = document.getElementById('othersRecordList');
+  const others = currentMembers.filter(m=>!isMe(m.uid));
+  let html = '';
+  for(const m of others){
+    const s = await db.collection('trips').doc(currentTrip.id).collection('personalRecords')
+      .where('userId','==',m.uid).where('isPublic','==',true).get();
+    const records = s.docs.map(d=>({id:d.id, ...d.data()}));
+    if(records.length===0) continue;
+    html += `<h3 style="font-size:13.5px;margin-top:14px;display:flex;align-items:center;">${avatarChipHTML(m,18)}${esc(m.displayName)}</h3>`;
+    html += records.map(r=>`
+      <div class="record-row">
+        <div><div>${esc(r.title)}</div><div class="record-meta">${r.date}</div></div>
+        <div class="expense-amount">${fmtCurrency(r.amount, r.currency, r.customCurrencyName)}</div>
+      </div>
+    `).join('');
+  }
+  othersEl.innerHTML = html || `<div class="empty-state">目前沒有其他人公開記帳</div>`;
 }
 
 // ---------------- 團員 ----------------
