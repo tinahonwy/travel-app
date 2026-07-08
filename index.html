@@ -350,8 +350,8 @@ function minOptionsHTML(){
     return `<option value="${v}">${v} 分</option>`;
   }).join('');
 }
-function endHourOptionsHTML(){ return `<option value="">不填沒關係</option>` + hourOptionsHTML(); }
-function endMinOptionsHTML(){ return `<option value="">不填沒關係</option>` + minOptionsHTML(); }
+function endHourOptionsHTML(){ return `<option value="">不填</option>` + hourOptionsHTML(); }
+function endMinOptionsHTML(){ return `<option value="">不填</option>` + minOptionsHTML(); }
 function isMapLink(url){
   if(!url) return false;
   return /google\.[a-z.]+\/maps|maps\.google\.|maps\.app\.goo\.gl|goo\.gl\/maps|\/maps\?|^https?:\/\/maps\./i.test(url);
@@ -710,9 +710,22 @@ async function renderItineraryTab(el){
       <div class="day-block-inner">
         <div class="day-weekday">${weekdayLabel(d.date)}</div>
         <div class="day-content">
-      <div class="day-header">
+      <div class="day-header" data-day-view="${d.id}">
         <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
-        <button class="btn-danger" data-del-day="${d.id}">刪除整天</button>
+        <div style="display:flex;gap:6px;">
+          <button class="item-btn item-btn-edit" data-day-edit="${d.id}">編輯</button>
+          <button class="item-btn item-btn-del" data-del-day="${d.id}">刪除整天</button>
+        </div>
+      </div>
+      <div class="edit-item-form hidden" data-day-edit-form="${d.id}">
+        <div class="field-row">
+          <div class="field" style="flex:0 0 150px"><label>日期</label><div class="date-wrap"><input type="date" class="day-e-date" value="${d.date}" required></div></div>
+          <div class="field" style="flex:2"><label>標題</label><input type="text" class="day-e-title" value="${esc(d.title)}" required></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn btn-accent day-e-save" style="flex:1">儲存</button>
+          <button type="button" class="btn btn-outline day-e-cancel">取消</button>
+        </div>
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
       <button type="button" class="btn btn-outline btn-block toggle-add-item" data-day-id="${d.id}" style="margin-top:12px">＋ 新增行程項目</button>
@@ -731,9 +744,10 @@ async function renderItineraryTab(el){
             <input type="text" class="i-title" placeholder="例如：道頓堀逛街" required>
           </div>
         </div>
+        <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
         <div class="field-row">
           <div class="field" style="flex:0 0 96px">
-            <label>結束時（不填沒關係）</label>
+            <label>結束時</label>
             <select class="i-end-hour">${endHourOptionsHTML()}</select>
           </div>
           <div class="field" style="flex:0 0 96px">
@@ -778,6 +792,29 @@ async function renderItineraryTab(el){
     btn.onclick = async ()=>{
       if(!confirm('確定要刪除這一天嗎？')) return;
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(btn.dataset.delDay).delete();
+      renderItineraryTab(el);
+    };
+  });
+
+  daysListEl.querySelectorAll('[data-day-edit]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const dayId = btn.dataset.dayEdit;
+      daysListEl.querySelector(`[data-day-view="${dayId}"]`).classList.add('hidden');
+      daysListEl.querySelector(`[data-day-edit-form="${dayId}"]`).classList.remove('hidden');
+    };
+  });
+  daysListEl.querySelectorAll('[data-day-edit-form]').forEach(formBox=>{
+    const dayId = formBox.dataset.dayEditForm;
+    formBox.querySelector('.day-e-cancel').onclick = ()=>{
+      formBox.classList.add('hidden');
+      daysListEl.querySelector(`[data-day-view="${dayId}"]`).classList.remove('hidden');
+    };
+    formBox.querySelector('.day-e-save').onclick = async ()=>{
+      const date = formBox.querySelector('.day-e-date').value;
+      const title = formBox.querySelector('.day-e-title').value.trim();
+      if(!title){ alert('請輸入標題'); return; }
+      if(!date){ alert('請選擇日期'); return; }
+      await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).update({ date, title });
       renderItineraryTab(el);
     };
   });
@@ -853,8 +890,9 @@ async function renderItemsFor(dayId){
             <div class="field" style="flex:0 0 96px"><label>分</label><select class="it-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
             <div class="field" style="flex:2"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" required></div>
           </div>
+          <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
           <div class="field-row">
-            <div class="field" style="flex:0 0 96px"><label>結束時（不填沒關係）</label><select class="it-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
+            <div class="field" style="flex:0 0 96px"><label>結束時</label><select class="it-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
             <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="it-end-min">${em ? endMinOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`) : endMinOptionsHTML()}</select></div>
           </div>
           <div class="field"><label>備註（選填）</label><input type="text" class="it-note" value="${esc(item.note||'')}"></div>
@@ -957,8 +995,9 @@ async function renderOverviewItemsFor(dayId){
             <div class="field" style="flex:0 0 96px"><label>分</label><select class="ov-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
             <div class="field" style="flex:2"><label>要去哪裡／做什麼</label><input type="text" class="ov-title" value="${esc(item.title)}" required></div>
           </div>
+          <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
           <div class="field-row">
-            <div class="field" style="flex:0 0 96px"><label>結束時（不填沒關係）</label><select class="ov-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
+            <div class="field" style="flex:0 0 96px"><label>結束時</label><select class="ov-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
             <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="ov-end-min">${em ? endMinOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`) : endMinOptionsHTML()}</select></div>
           </div>
           <div class="field"><label>備註（選填）</label><input type="text" class="ov-note" value="${esc(item.note||'')}"></div>
