@@ -133,6 +133,13 @@
   .detail-img-preview-wrap{display:flex;align-items:center;gap:8px;}
   .detail-img-preview{max-width:80px;max-height:80px;border-radius:8px;border:1px solid var(--border);object-fit:cover;}
 
+  .ct-display{font-family:var(--font-mono);font-size:20px;text-align:right;padding:12px 14px;background:var(--paper);border:1px solid var(--border);border-radius:10px;word-break:break-all;min-height:28px;}
+  .ct-keypad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;}
+  .ct-key{padding:14px 0;border-radius:10px;border:1px solid var(--border);background:var(--paper-card);font-size:16px;font-family:var(--font-mono);color:var(--ink);cursor:pointer;}
+  .ct-key:active{transform:scale(.95);background:var(--paper);}
+  .ct-key-op{background:var(--vermillion-soft);color:var(--vermillion);font-weight:700;}
+  .ct-key-wide{grid-column:span 2;}
+
   .balance-list{list-style:none;padding:0;margin:0;}
   .balance-list li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
   .balance-list li:last-child{border-bottom:none;}
@@ -667,6 +674,7 @@ async function renderTripDetailView(){
         行程代碼：<strong>${currentTrip.id}</strong>
         <button id="copyCodeBtn" class="btn-danger" style="color:var(--ink-soft)">複製</button>
       </div>
+      <div id="weatherSection"></div>
       <div id="tabContent"></div>
     </div>
     <div class="tabbar"><div class="tabbar-inner">
@@ -688,6 +696,7 @@ async function renderTripDetailView(){
     btn.onclick = ()=>{ activeTab = btn.dataset.tab; updateTabUI(); renderTabContent(); };
   });
   updateTabUI();
+  renderWeatherSection();
   await renderTabContent();
 }
 
@@ -862,6 +871,267 @@ function openItemDetailModal(collectionRef, item){
   overlay.querySelector('#closeItemDetailModal').onclick = ()=>overlay.remove();
   overlay.onclick = (ev)=>{ if(ev.target===overlay) overlay.remove(); };
   mountItemDetail(collectionRef, item, overlay);
+}
+
+// ---------------- 天氣預報（Open-Meteo，免金鑰） ----------------
+function weatherEmoji(code){
+  if(code===0) return '☀️';
+  if([1,2].includes(code)) return '🌤️';
+  if(code===3) return '☁️';
+  if([45,48].includes(code)) return '🌫️';
+  if([51,53,55,56,57,61,63,65,66,67,80,81,82].includes(code)) return '🌧️';
+  if([71,73,75,77,85,86].includes(code)) return '🌨️';
+  if([95,96,99].includes(code)) return '⛈️';
+  return '🌡️';
+}
+async function geocodeCity(name){
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh`);
+  const data = await res.json();
+  if(!data.results || data.results.length===0) return null;
+  const r = data.results[0];
+  return { name: r.name + (r.country ? `，${r.country}` : ''), lat:r.latitude, lon:r.longitude };
+}
+async function fetchWeatherForTrip(){
+  if(weatherCache && weatherCache.tripId===currentTrip.id) return weatherCache.days;
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentTrip.destinationLat}&longitude=${currentTrip.destinationLon}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`);
+  const data = await res.json();
+  const dates = data.daily.time, codes = data.daily.weathercode, maxT = data.daily.temperature_2m_max, minT = data.daily.temperature_2m_min;
+  const days = [];
+  for(let i=0;i<dates.length;i++){
+    const dt = dates[i];
+    if(dt>=currentTrip.startDate && dt<=currentTrip.endDate){
+      days.push({ date: dt, dateLabel: dt.slice(5).replace('-','/')+' '+weekdayLabel(dt), emoji: weatherEmoji(codes[i]), max: Math.round(maxT[i]), min: Math.round(minT[i]) });
+    }
+  }
+  weatherCache = {tripId: currentTrip.id, days};
+  return days;
+}
+async function renderWeatherSection(){
+  const el = document.getElementById('weatherSection');
+  if(!el || !currentTrip) return;
+
+  if(!currentTrip.destinationCity){
+    el.innerHTML = `
+      <div class="card">
+        <h2>🌤️ 天氣預報</h2>
+        <p class="subtitle" style="margin-bottom:12px">設定目的地城市，就能看到行程期間的天氣預報</p>
+        <form id="setDestinationForm" style="display:flex;gap:8px;">
+          <input type="text" id="destinationInput" placeholder="例如：大阪、東京、Osaka" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required>
+          <button type="submit" class="btn btn-outline">設定</button>
+        </form>
+      </div>
+    `;
+    document.getElementById('setDestinationForm').onsubmit = async (e)=>{
+      e.preventDefault();
+      const city = document.getElementById('destinationInput').value.trim();
+      if(!city) return;
+      const btn = e.target.querySelector('button');
+      btn.disabled = true; btn.textContent = '搜尋中…';
+      try{
+        const geo = await geocodeCity(city);
+        if(!geo){ alert('找不到這個城市，換個名稱試試（可以試試英文拼音）'); btn.disabled=false; btn.textContent='設定'; return; }
+        await db.collection('trips').doc(currentTrip.id).update({
+          destinationCity: geo.name, destinationLat: geo.lat, destinationLon: geo.lon
+        });
+        currentTrip.destinationCity = geo.name;
+        currentTrip.destinationLat = geo.lat;
+        currentTrip.destinationLon = geo.lon;
+        weatherCache = null;
+        renderWeatherSection();
+      }catch(err){
+        alert('設定失敗，請檢查網路連線：'+err.message);
+        btn.disabled = false; btn.textContent = '設定';
+      }
+    };
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-row" style="align-items:flex-start;">
+        <h2 style="margin-bottom:0">🌤️ ${esc(currentTrip.destinationCity)} 天氣預報</h2>
+        <button class="btn-danger" id="changeDestinationBtn" style="flex-shrink:0">更改</button>
+      </div>
+      <div id="weatherBody" style="margin-top:10px;"><div class="empty-state">載入中…</div></div>
+    </div>
+  `;
+  document.getElementById('changeDestinationBtn').onclick = async ()=>{
+    if(!confirm('確定要清除目前的目的地設定嗎？')) return;
+    await db.collection('trips').doc(currentTrip.id).update({
+      destinationCity: firebase.firestore.FieldValue.delete(),
+      destinationLat: firebase.firestore.FieldValue.delete(),
+      destinationLon: firebase.firestore.FieldValue.delete()
+    });
+    delete currentTrip.destinationCity; delete currentTrip.destinationLat; delete currentTrip.destinationLon;
+    weatherCache = null;
+    renderWeatherSection();
+  };
+  const bodyEl = document.getElementById('weatherBody');
+  try{
+    const days = await fetchWeatherForTrip();
+    if(days.length===0){
+      bodyEl.innerHTML = `<div class="empty-state">目前查得到的預報還沒到你的旅行日期，出發前幾天再回來看看吧</div>`;
+      return;
+    }
+    bodyEl.innerHTML = `
+      <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;">
+        ${days.map(d=>`
+          <div style="flex:0 0 auto;min-width:74px;text-align:center;background:var(--paper);border:1px solid var(--border);border-radius:10px;padding:10px 8px;">
+            <div style="font-size:11px;color:var(--muted);">${d.dateLabel}</div>
+            <div style="font-size:24px;margin:4px 0;">${d.emoji}</div>
+            <div style="font-size:12.5px;font-family:var(--font-mono);">${d.max}°/${d.min}°</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }catch(err){
+    bodyEl.innerHTML = `<div class="empty-state">天氣資料載入失敗：${esc(err.message)}</div>`;
+  }
+}
+
+// ---------------- 匯率換算小工具（open.er-api.com，免金鑰） ----------------
+async function fetchRates(){
+  const now = Date.now();
+  if(ratesCache && (now - ratesCache.fetchedAt) < 6*60*60*1000) return ratesCache.rates;
+  const res = await fetch('https://open.er-api.com/v6/latest/TWD');
+  const data = await res.json();
+  if(data.result !== 'success') throw new Error('匯率資料取得失敗');
+  ratesCache = {rates:data.rates, fetchedAt:now};
+  return data.rates;
+}
+function fmtNum(n, decimals){
+  return Number(n||0).toLocaleString('zh-TW', {maximumFractionDigits: decimals==null?2:decimals});
+}
+// 安全的四則運算計算機（只允許數字、+ - * / ( ). ，不使用 eval）
+function safeEval(exprRaw){
+  const expr = (exprRaw||'').replace(/\s+/g,'');
+  if(expr==='') return null;
+  if(!/^[0-9+\-*/().]*$/.test(expr)) throw new Error('包含不支援的字元');
+  let i = 0;
+  function parseExpr(){
+    let v = parseTerm();
+    while(expr[i]==='+' || expr[i]==='-'){
+      const op = expr[i++];
+      const t = parseTerm();
+      v = op==='+' ? v+t : v-t;
+    }
+    return v;
+  }
+  function parseTerm(){
+    let v = parseFactor();
+    while(expr[i]==='*' || expr[i]==='/'){
+      const op = expr[i++];
+      const f = parseFactor();
+      v = op==='*' ? v*f : v/f;
+    }
+    return v;
+  }
+  function parseFactor(){
+    if(expr[i]==='('){ i++; const v = parseExpr(); if(expr[i]===')') i++; return v; }
+    if(expr[i]==='-'){ i++; return -parseFactor(); }
+    if(expr[i]==='+'){ i++; return parseFactor(); }
+    const start = i;
+    while(i<expr.length && /[0-9.]/.test(expr[i])) i++;
+    if(start===i) throw new Error('格式錯誤');
+    return parseFloat(expr.slice(start,i));
+  }
+  const result = parseExpr();
+  if(i!==expr.length) throw new Error('格式錯誤');
+  if(!isFinite(result)) throw new Error('計算錯誤');
+  return result;
+}
+function currencyToolCardHTML(){
+  return `
+    <div class="card" id="currencyToolCard">
+      <h2>💱 匯率換算小工具</h2>
+      <div class="field">${currencySelectHTML('JPY','', 'id="ctCurrency"')}</div>
+      <div style="display:flex;gap:16px;margin:2px 0 10px;font-size:13px;color:var(--ink-soft);flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toTWD" checked> 外幣 → 台幣</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toForeign"> 台幣 → 外幣</label>
+      </div>
+      <div class="ct-display" id="ctDisplay">0</div>
+      <div id="ctResult" style="font-size:15px;font-weight:600;margin:8px 0 4px;">載入匯率中…</div>
+      <div id="ctMeta" class="subtitle" style="margin:0;"></div>
+      <div class="ct-keypad">
+        <button type="button" class="ct-key ct-key-op" data-ck="C">C</button>
+        <button type="button" class="ct-key ct-key-op" data-ck="⌫">⌫</button>
+        <button type="button" class="ct-key ct-key-op" data-ck="(">(</button>
+        <button type="button" class="ct-key ct-key-op" data-ck=")">)</button>
+        <button type="button" class="ct-key" data-ck="7">7</button>
+        <button type="button" class="ct-key" data-ck="8">8</button>
+        <button type="button" class="ct-key" data-ck="9">9</button>
+        <button type="button" class="ct-key ct-key-op" data-ck="/">÷</button>
+        <button type="button" class="ct-key" data-ck="4">4</button>
+        <button type="button" class="ct-key" data-ck="5">5</button>
+        <button type="button" class="ct-key" data-ck="6">6</button>
+        <button type="button" class="ct-key ct-key-op" data-ck="*">×</button>
+        <button type="button" class="ct-key" data-ck="1">1</button>
+        <button type="button" class="ct-key" data-ck="2">2</button>
+        <button type="button" class="ct-key" data-ck="3">3</button>
+        <button type="button" class="ct-key ct-key-op" data-ck="-">−</button>
+        <button type="button" class="ct-key ct-key-wide" data-ck="0">0</button>
+        <button type="button" class="ct-key" data-ck=".">.</button>
+        <button type="button" class="ct-key ct-key-op" data-ck="+">+</button>
+      </div>
+    </div>
+  `;
+}
+function bindCurrencyTool(scopeEl){
+  const card = scopeEl.querySelector('#currencyToolCard');
+  if(!card) return;
+  const displayEl = card.querySelector('#ctDisplay');
+  const currencyEl = card.querySelector('#ctCurrency');
+  const resultEl = card.querySelector('#ctResult');
+  const metaEl = card.querySelector('#ctMeta');
+  let expr = '1';
+
+  function renderDisplay(){
+    displayEl.textContent = expr === '' ? '0' : expr;
+  }
+
+  async function update(){
+    resultEl.textContent = '載入匯率中…';
+    metaEl.textContent = '';
+    try{
+      const rates = await fetchRates();
+      const code = currencyEl.value;
+      const direction = card.querySelector('input[name="ctDirection"]:checked').value;
+      if(code==='OTHER'){ resultEl.textContent = '這個幣別沒有即時匯率，請自行輸入'; return; }
+      const rate = rates[code]; // 1 台幣 = rate[code] 個這個幣別
+      if(!rate){ resultEl.textContent = '查不到這個幣別的匯率'; return; }
+      let raw;
+      try{ raw = safeEval(expr); }
+      catch(err){ resultEl.textContent = '算式還沒完成'; return; }
+      if(raw===null || !isFinite(raw)){ resultEl.textContent = '請按數字鍵輸入金額'; return; }
+      if(direction==='toTWD'){
+        const twd = raw / rate;
+        resultEl.textContent = `= ${fmtNum(raw)} ${code} ≈ NT$ ${fmt(twd)}`;
+      } else {
+        const foreign = raw * rate;
+        resultEl.textContent = `= NT$ ${fmtNum(raw)} ≈ ${fmtNum(foreign)} ${code}`;
+      }
+      const oneUnitTWD = 1/rate;
+      metaEl.textContent = `參考匯率：1 ${code} ≈ NT$ ${oneUnitTWD.toFixed(3)}（僅供參考，非即時交易匯率）`;
+    }catch(err){
+      resultEl.textContent = '匯率載入失敗，請檢查網路連線';
+    }
+  }
+
+  card.querySelectorAll('.ct-key').forEach(btn=>{
+    btn.onclick = ()=>{
+      const k = btn.dataset.ck;
+      if(k==='C'){ expr = ''; }
+      else if(k==='⌫'){ expr = expr.slice(0,-1); }
+      else { expr += k; }
+      renderDisplay();
+      update();
+    };
+  });
+  currencyEl.onchange = update;
+  card.querySelectorAll('input[name="ctDirection"]').forEach(r=>{ r.onchange = update; });
+
+  renderDisplay();
+  update();
 }
 
 // ---------------- 行程規劃 ----------------
@@ -1338,6 +1608,7 @@ async function renderExpensesTab(el){
   `).join('');
 
   el.innerHTML = `
+    ${currencyToolCardHTML()}
     <div class="card">
       <h2>新增一筆花費</h2>
       <form id="addExpenseForm">
@@ -1425,6 +1696,7 @@ async function renderExpensesTab(el){
   `;
 
   document.getElementById('expDate').value = todayStr();
+  bindCurrencyTool(el);
 
   const expCurrencyEl = document.getElementById('expCurrency');
   const expRateEl = document.getElementById('expRate');
@@ -1585,6 +1857,7 @@ async function renderPersonalTab(el){
   }
 
   el.innerHTML = `
+    ${currencyToolCardHTML()}
     <div class="card">
       <h2>新增一筆記帳</h2>
       <form id="addRecordForm">
@@ -1631,6 +1904,7 @@ async function renderPersonalTab(el){
   `;
 
   document.getElementById('recDate').value = todayStr();
+  bindCurrencyTool(el);
 
   const recCurrencyEl = document.getElementById('recCurrency');
   const recRateEl = document.getElementById('recRate');
