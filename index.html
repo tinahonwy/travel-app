@@ -112,10 +112,23 @@
   .item-row:last-child{border-bottom:none;}
   .item-time{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);width:auto;min-width:44px;max-width:78px;flex-shrink:0;padding-top:2px;line-height:1.4;}
   .item-body{flex:1;min-width:0;}
-  .item-title{font-weight:600;font-size:13.5px;}
+  .item-title{font-weight:600;font-size:13.5px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;}
+  .item-title:hover{color:var(--vermillion);}
+  .detail-caret{font-size:10px;color:var(--muted);transition:transform .15s ease;}
   .item-note{font-size:12.5px;color:var(--muted);margin-top:2px;}
   .item-link{font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-top:4px;}
   .item-link .link-ic{font-size:12px;line-height:1;}
+
+  .item-detail{margin-top:10px;padding:12px;background:var(--paper);border:1px dashed var(--border);border-radius:10px;}
+  .detail-section{margin-bottom:12px;}
+  .detail-section:last-child{margin-bottom:0;}
+  .detail-section-head{font-size:11.5px;letter-spacing:.06em;color:var(--vermillion);font-weight:700;margin-bottom:6px;text-transform:uppercase;}
+  .detail-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:13px;}
+  .detail-row:last-of-type{border-bottom:none;}
+  .detail-text{flex:1;min-width:0;word-break:break-word;}
+  .detail-add-form{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+  .detail-add-form input{flex:1;min-width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--paper-card);color:var(--ink);}
+  .detail-add-form .btn{padding:8px 14px;font-size:12.5px;flex-shrink:0;}
 
   .balance-list{list-style:none;padding:0;margin:0;}
   .balance-list li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
@@ -198,6 +211,7 @@ let currentTrip = null;
 let currentMembers = [];
 let activeTab = 'itinerary';
 let authMode = 'login';
+const expandedItemIds = new Set();
 
 const root = document.getElementById('root');
 const topBar = document.getElementById('topBar');
@@ -331,6 +345,7 @@ function fmt(n){ return Number(n||0).toLocaleString('zh-TW', {maximumFractionDig
 function nameOf(uid){ const m = currentMembers.find(m=>m.uid===uid); return m ? m.displayName : '未知成員'; }
 function isMe(uid){ return currentUser && uid === currentUser.uid; }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
+function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 function weekdayLabel(dateStr){
   if(!dateStr) return '';
@@ -470,6 +485,11 @@ function renderAuthView(){
             <label>密碼</label>
             <input type="password" id="password" placeholder="至少 6 個字元" minlength="6" required>
           </div>
+          ${authMode==='register' ? `
+          <div class="field">
+            <label>確認密碼</label>
+            <input type="password" id="passwordConfirm" placeholder="再輸入一次密碼" minlength="6" required>
+          </div>` : ''}
           <button type="submit" class="btn btn-accent btn-block">${authMode==='login' ? '登入' : '註冊'}</button>
         </form>
         <p class="auth-toggle">
@@ -488,6 +508,13 @@ function renderAuthView(){
     e.preventDefault();
     const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
+    if(authMode==='register'){
+      const passwordConfirm = document.getElementById('passwordConfirm').value;
+      if(password !== passwordConfirm){
+        showMsg('authMsgBox', '兩次輸入的密碼不一樣，請再確認一次');
+        return;
+      }
+    }
     try{
       if(authMode==='register'){
         const displayName = document.getElementById('displayName').value.trim();
@@ -673,6 +700,108 @@ async function renderTabContent(){
   if(activeTab==='members') return renderMembersTab(el);
 }
 
+// ---------------- 行程項目「詳情」（備忘錄 / 多個連結） ----------------
+function itemDetailHTML(item){
+  const memos = item.memos || [];
+  const links = item.links || [];
+  const isOpen = expandedItemIds.has(item.id);
+  return `
+    <div class="item-detail ${isOpen?'':'hidden'}" data-detail-for="${item.id}">
+      <div class="detail-section">
+        <div class="detail-section-head">備忘錄</div>
+        <div data-memo-list>
+        ${memos.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有備忘錄，例如注意事項、房號、櫃檯電話…</div>` : memos.map(m=>`
+          <div class="detail-row">
+            <span class="detail-text">${esc(m.text)}</span>
+            <button class="btn-danger" data-del-memo="${m.id}">刪除</button>
+          </div>
+        `).join('')}
+        </div>
+        <form class="detail-add-form" data-add-memo>
+          <input type="text" class="detail-memo-input" placeholder="新增一條備忘錄">
+          <button type="submit" class="btn btn-outline">新增</button>
+        </form>
+      </div>
+      <div class="detail-section">
+        <div class="detail-section-head">連結</div>
+        <div data-link-list>
+        ${links.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有連結，可以放地圖、訂房頁面、菜單…</div>` : links.map(l=>`
+          <div class="detail-row">
+            <a class="item-link" href="${esc(l.url)}" target="_blank" rel="noopener">${linkIconHTML(l.url)}${esc(l.label || '連結')} ↗</a>
+            <button class="btn-danger" data-del-link="${l.id}">刪除</button>
+          </div>
+        `).join('')}
+        </div>
+        <form class="detail-add-form" data-add-link>
+          <input type="text" class="detail-link-label" placeholder="連結名稱（選填）">
+          <input type="url" class="detail-link-url" placeholder="https://..." required>
+          <button type="submit" class="btn btn-outline">新增</button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function bindItemDetailHandlers(collectionRef, item, scopeEl){
+  const detailEl = scopeEl.querySelector(`[data-detail-for="${item.id}"]`);
+  if(!detailEl) return;
+
+  function refresh(){
+    detailEl.outerHTML = itemDetailHTML(item);
+    bindItemDetailHandlers(collectionRef, item, scopeEl);
+  }
+
+  detailEl.querySelectorAll('[data-del-memo]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      item.memos = (item.memos||[]).filter(m=>m.id!==btn.dataset.delMemo);
+      await collectionRef.doc(item.id).update({memos:item.memos});
+      refresh();
+    };
+  });
+  detailEl.querySelectorAll('[data-del-link]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      item.links = (item.links||[]).filter(l=>l.id!==btn.dataset.delLink);
+      await collectionRef.doc(item.id).update({links:item.links});
+      refresh();
+    };
+  });
+  const memoForm = detailEl.querySelector('[data-add-memo]');
+  memoForm.onsubmit = async (e)=>{
+    e.preventDefault();
+    const input = memoForm.querySelector('.detail-memo-input');
+    const text = input.value.trim();
+    if(!text) return;
+    item.memos = [...(item.memos||[]), {id:genId(), text}];
+    await collectionRef.doc(item.id).update({memos:item.memos});
+    refresh();
+  };
+  const linkForm = detailEl.querySelector('[data-add-link]');
+  linkForm.onsubmit = async (e)=>{
+    e.preventDefault();
+    const label = linkForm.querySelector('.detail-link-label').value.trim();
+    const url = linkForm.querySelector('.detail-link-url').value.trim();
+    if(!url) return;
+    item.links = [...(item.links||[]), {id:genId(), label, url}];
+    await collectionRef.doc(item.id).update({links:item.links});
+    refresh();
+  };
+}
+
+function bindDetailToggle(scopeEl){
+  scopeEl.querySelectorAll('[data-toggle-detail]').forEach(t=>{
+    t.onclick = ()=>{
+      const id = t.dataset.toggleDetail;
+      const detailEl = scopeEl.querySelector(`[data-detail-for="${id}"]`);
+      if(!detailEl) return;
+      const willOpen = detailEl.classList.contains('hidden');
+      if(willOpen){ expandedItemIds.add(id); } else { expandedItemIds.delete(id); }
+      detailEl.classList.toggle('hidden', !willOpen);
+      const caret = t.querySelector('.detail-caret');
+      if(caret) caret.textContent = willOpen ? '▴' : '▾';
+    };
+  });
+}
+
 // ---------------- 行程規劃 ----------------
 async function renderItineraryTab(el){
   const snap = await db.collection('trips').doc(currentTrip.id).collection('days').orderBy('date').get();
@@ -834,7 +963,9 @@ async function renderItineraryTab(el){
         endTime,
         title: card.querySelector('.i-title').value.trim(),
         note: card.querySelector('.i-note').value.trim(),
-        link: card.querySelector('.i-link').value.trim()
+        link: card.querySelector('.i-link').value.trim(),
+        memos: [],
+        links: []
       };
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').add(item);
       form.reset();
@@ -850,7 +981,8 @@ async function renderItineraryTab(el){
 async function renderItemsFor(dayId){
   const container = document.querySelector(`[data-items-for="${dayId}"]`);
   if(!container) return;
-  const snap = await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').orderBy('time').get();
+  const collectionRef = db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items');
+  const snap = await collectionRef.orderBy('time').get();
   const items = snap.docs.map(d=>({id:d.id, ...d.data()}));
   if(items.length===0){
     container.innerHTML = `<div class="empty-state" style="padding:14px 0">這天還沒有排行程</div>`;
@@ -860,9 +992,10 @@ async function renderItemsFor(dayId){
     <div class="item-row" data-item-row="${it.id}">
       <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
       <div class="item-body">
-        <div class="item-title">${esc(it.title)}</div>
+        <div class="item-title" data-toggle-detail="${it.id}">${esc(it.title)} <span class="detail-caret">${expandedItemIds.has(it.id)?'▴':'▾'}</span></div>
         ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
         ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
+        ${itemDetailHTML(it)}
       </div>
       <div class="item-actions">
         <button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>
@@ -870,10 +1003,13 @@ async function renderItemsFor(dayId){
       </div>
     </div>
   `).join('');
+  bindDetailToggle(container);
+  items.forEach(it=>bindItemDetailHandlers(collectionRef, it, container));
   container.querySelectorAll('[data-del-item]').forEach(btn=>{
     btn.onclick = async ()=>{
       if(!confirm('確定要刪除這筆行程嗎？')) return;
-      await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(btn.dataset.delItem).delete();
+      await collectionRef.doc(btn.dataset.delItem).delete();
+      expandedItemIds.delete(btn.dataset.delItem);
       renderItemsFor(dayId);
     };
   });
@@ -913,7 +1049,7 @@ async function renderItemsFor(dayId){
         const endMinVal = formEl.querySelector('.it-end-min').value;
         const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
-        await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(item.id).update({
+        await collectionRef.doc(item.id).update({
           time: `${hourVal}:${minVal}`,
           endTime,
           title,
@@ -953,7 +1089,8 @@ async function renderOverviewTab(el){
 async function renderOverviewItemsFor(dayId){
   const container = document.querySelector(`[data-overview-items-for="${dayId}"]`);
   if(!container) return;
-  const snap = await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').orderBy('time').get();
+  const collectionRef = db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items');
+  const snap = await collectionRef.orderBy('time').get();
   const items = snap.docs.map(d=>({id:d.id, ...d.data()}));
   if(items.length===0){
     container.innerHTML = `<div class="empty-state" style="padding:14px 0">這天還沒有排行程</div>`;
@@ -963,9 +1100,10 @@ async function renderOverviewItemsFor(dayId){
     <div class="item-row" data-item-row="${it.id}">
       <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
       <div class="item-body">
-        <div class="item-title">${esc(it.title)}</div>
+        <div class="item-title" data-toggle-detail="ov-${it.id}">${esc(it.title)} <span class="detail-caret">${expandedItemIds.has('ov-'+it.id)?'▴':'▾'}</span></div>
         ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
         ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
+        ${itemDetailHTML({...it, id:'ov-'+it.id, _realId:it.id})}
       </div>
       <div class="item-actions">
         <button class="item-btn item-btn-edit" data-ov-edit="${it.id}">編輯</button>
@@ -974,10 +1112,18 @@ async function renderOverviewItemsFor(dayId){
     </div>
   `).join('');
 
+  bindDetailToggle(container);
+  items.forEach(it=>{
+    // use a wrapped collectionRef-like object so real doc id (not the "ov-" prefixed one) gets updated
+    const wrapped = { doc: (fakeId)=>collectionRef.doc(it.id) };
+    bindItemDetailHandlers(wrapped, {...it, id:'ov-'+it.id}, container);
+  });
+
   container.querySelectorAll('[data-ov-del]').forEach(btn=>{
     btn.onclick = async ()=>{
       if(!confirm('確定要刪除這筆行程嗎？')) return;
-      await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(btn.dataset.ovDel).delete();
+      await collectionRef.doc(btn.dataset.ovDel).delete();
+      expandedItemIds.delete('ov-'+btn.dataset.ovDel);
       renderOverviewItemsFor(dayId);
     };
   });
@@ -1018,7 +1164,7 @@ async function renderOverviewItemsFor(dayId){
         const endMinVal = formEl.querySelector('.ov-end-min').value;
         const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
-        await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').doc(item.id).update({
+        await collectionRef.doc(item.id).update({
           time: `${hourVal}:${minVal}`,
           endTime,
           title,
