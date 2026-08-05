@@ -668,13 +668,17 @@ async function renderTripDetailView(){
   root.innerHTML = `
     <div class="container has-tabbar">
       <button id="backBtn" class="btn btn-outline" style="margin-bottom:16px">← 回到我的旅行</button>
-      <span class="eyebrow">${currentTrip.startDate}（週${WEEKDAYS[new Date(currentTrip.startDate+'T00:00:00').getDay()]}） → ${currentTrip.endDate}（週${WEEKDAYS[new Date(currentTrip.endDate+'T00:00:00').getDay()]}）</span>
-      <h1>${esc(currentTrip.name)}</h1>
+      <div class="card-row" style="align-items:flex-start;margin-bottom:6px;">
+        <div>
+          <span class="eyebrow">${currentTrip.startDate}（週${WEEKDAYS[new Date(currentTrip.startDate+'T00:00:00').getDay()]}） → ${currentTrip.endDate}（週${WEEKDAYS[new Date(currentTrip.endDate+'T00:00:00').getDay()]}）</span>
+          <h1 style="margin-bottom:0">${esc(currentTrip.name)}</h1>
+        </div>
+        <button id="editTripBtn" class="item-btn item-btn-edit" style="flex-shrink:0;margin-top:2px;">編輯</button>
+      </div>
       <div class="trip-code">
         行程代碼：<strong>${currentTrip.id}</strong>
         <button id="copyCodeBtn" class="btn-danger" style="color:var(--ink-soft)">複製</button>
       </div>
-      <div id="weatherSection"></div>
       <div id="tabContent"></div>
     </div>
     <div class="tabbar"><div class="tabbar-inner">
@@ -686,6 +690,7 @@ async function renderTripDetailView(){
     </div></div>
   `;
   document.getElementById('backBtn').onclick = ()=>{ currentTrip=null; renderTripsView(); };
+  document.getElementById('editTripBtn').onclick = ()=>openEditTripModal();
   document.getElementById('copyCodeBtn').onclick = ()=>{
     navigator.clipboard.writeText(currentTrip.id);
     const b = document.getElementById('copyCodeBtn');
@@ -696,7 +701,6 @@ async function renderTripDetailView(){
     btn.onclick = ()=>{ activeTab = btn.dataset.tab; updateTabUI(); renderTabContent(); };
   });
   updateTabUI();
-  renderWeatherSection();
   await renderTabContent();
 }
 
@@ -704,6 +708,54 @@ function updateTabUI(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.tab === activeTab);
   });
+}
+
+function openEditTripModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>編輯行程</h3>
+        <button class="modal-close" id="closeEditTripModal">✕</button>
+      </div>
+      <div id="editTripMsgBox"></div>
+      <div class="field">
+        <label>行程名稱</label>
+        <input type="text" id="editTripName" value="${esc(currentTrip.name)}" maxlength="40">
+      </div>
+      <div class="field-row">
+        <div class="field"><label>出發日</label><div class="date-wrap"><input type="date" id="editTripStart" value="${currentTrip.startDate}"></div></div>
+        <div class="field"><label>回程日</label><div class="date-wrap"><input type="date" id="editTripEnd" value="${currentTrip.endDate}"></div></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="saveEditTripBtn">儲存</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('closeEditTripModal').onclick = ()=>overlay.remove();
+  overlay.onclick = (ev)=>{ if(ev.target===overlay) overlay.remove(); };
+  document.getElementById('saveEditTripBtn').onclick = async ()=>{
+    const btn = document.getElementById('saveEditTripBtn');
+    const name = document.getElementById('editTripName').value.trim();
+    const startDate = document.getElementById('editTripStart').value;
+    const endDate = document.getElementById('editTripEnd').value;
+    if(!name){ showMsg('editTripMsgBox', '請輸入行程名稱'); return; }
+    if(!startDate || !endDate){ showMsg('editTripMsgBox', '請選擇出發日跟回程日'); return; }
+    if(startDate > endDate){ showMsg('editTripMsgBox', '出發日不能晚於回程日'); return; }
+    btn.disabled = true; btn.textContent = '儲存中…';
+    try{
+      await db.collection('trips').doc(currentTrip.id).update({ name, startDate, endDate });
+      currentTrip.name = name;
+      currentTrip.startDate = startDate;
+      currentTrip.endDate = endDate;
+      weatherCache = null; // 日期範圍變了，天氣預報要重抓
+      overlay.remove();
+      renderTripDetailView();
+    }catch(err){
+      showMsg('editTripMsgBox', '儲存失敗：'+err.message);
+      btn.disabled = false; btn.textContent = '儲存';
+    }
+  };
 }
 
 async function renderTabContent(){
@@ -884,6 +936,19 @@ function weatherEmoji(code){
   if([95,96,99].includes(code)) return '⛈️';
   return '🌡️';
 }
+function weatherText(code){
+  const map = {
+    0:'晴朗', 1:'晴時多雲', 2:'多雲時晴', 3:'陰天',
+    45:'有霧', 48:'霧凇',
+    51:'毛毛雨', 53:'毛毛雨', 55:'毛毛雨', 56:'凍雨', 57:'凍雨',
+    61:'小雨', 63:'中雨', 65:'大雨', 66:'凍雨', 67:'凍雨',
+    71:'小雪', 73:'中雪', 75:'大雪', 77:'雪粒',
+    80:'陣雨', 81:'陣雨', 82:'強陣雨',
+    85:'陣雪', 86:'強陣雪',
+    95:'雷雨', 96:'雷雨帶冰雹', 99:'雷雨帶冰雹'
+  };
+  return map[code] || '天氣不明';
+}
 async function geocodeCity(name){
   const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=zh`);
   const data = await res.json();
@@ -891,20 +956,29 @@ async function geocodeCity(name){
   const r = data.results[0];
   return { name: r.name + (r.country ? `，${r.country}` : ''), lat:r.latitude, lon:r.longitude };
 }
-async function fetchWeatherForTrip(){
-  if(weatherCache && weatherCache.tripId===currentTrip.id) return weatherCache.days;
-  const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentTrip.destinationLat}&longitude=${currentTrip.destinationLon}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`);
+async function fetchWeatherData(){
+  if(weatherCache && weatherCache.tripId===currentTrip.id) return weatherCache;
+  // past_days 涵蓋最近幾天，forecast_days 涵蓋未來 16 天，這樣「今天」跟大部分想查的日期都查得到
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentTrip.destinationLat}&longitude=${currentTrip.destinationLon}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto&past_days=5&forecast_days=16`);
   const data = await res.json();
   const dates = data.daily.time, codes = data.daily.weathercode, maxT = data.daily.temperature_2m_max, minT = data.daily.temperature_2m_min;
-  const days = [];
-  for(let i=0;i<dates.length;i++){
-    const dt = dates[i];
-    if(dt>=currentTrip.startDate && dt<=currentTrip.endDate){
-      days.push({ date: dt, dateLabel: dt.slice(5).replace('-','/')+' '+weekdayLabel(dt), emoji: weatherEmoji(codes[i]), max: Math.round(maxT[i]), min: Math.round(minT[i]) });
-    }
-  }
-  weatherCache = {tripId: currentTrip.id, days};
-  return days;
+  const allDays = dates.map((dt,i)=>({
+    date: dt,
+    dateLabel: dt.slice(5).replace('-','/')+' '+weekdayLabel(dt),
+    emoji: weatherEmoji(codes[i]),
+    text: weatherText(codes[i]),
+    max: Math.round(maxT[i]),
+    min: Math.round(minT[i])
+  }));
+  const byDate = {};
+  allDays.forEach(d=>{ byDate[d.date] = d; });
+  const tripDays = allDays.filter(d=>d.date>=currentTrip.startDate && d.date<=currentTrip.endDate);
+  weatherCache = {
+    tripId: currentTrip.id, allDays, byDate, tripDays,
+    minDate: allDays[0] ? allDays[0].date : todayStr(),
+    maxDate: allDays[allDays.length-1] ? allDays[allDays.length-1].date : todayStr()
+  };
+  return weatherCache;
 }
 async function renderWeatherSection(){
   const el = document.getElementById('weatherSection');
@@ -968,22 +1042,53 @@ async function renderWeatherSection(){
   };
   const bodyEl = document.getElementById('weatherBody');
   try{
-    const days = await fetchWeatherForTrip();
-    if(days.length===0){
-      bodyEl.innerHTML = `<div class="empty-state">目前查得到的預報還沒到你的旅行日期，出發前幾天再回來看看吧</div>`;
-      return;
-    }
+    const wdata = await fetchWeatherData();
     bodyEl.innerHTML = `
-      <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;">
-        ${days.map(d=>`
-          <div style="flex:0 0 auto;min-width:74px;text-align:center;background:var(--paper);border:1px solid var(--border);border-radius:10px;padding:10px 8px;">
-            <div style="font-size:11px;color:var(--muted);">${d.dateLabel}</div>
-            <div style="font-size:24px;margin:4px 0;">${d.emoji}</div>
-            <div style="font-size:12.5px;font-family:var(--font-mono);">${d.max}°/${d.min}°</div>
-          </div>
-        `).join('')}
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+        <div class="date-wrap" style="flex:1;min-width:140px;">
+          <input type="date" id="weatherDatePick" value="${todayStr()}" min="${wdata.minDate}" max="${wdata.maxDate}">
+        </div>
+        <button type="button" class="btn btn-outline" id="weatherTodayBtn" style="flex-shrink:0;">今天</button>
       </div>
+      <div id="weatherSingleDay"></div>
+      ${wdata.tripDays.length>0 ? `
+        <p class="subtitle" style="margin:14px 0 8px;">行程期間預報</p>
+        <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;">
+          ${wdata.tripDays.map(d=>`
+            <div style="flex:0 0 auto;min-width:74px;text-align:center;background:var(--paper);border:1px solid var(--border);border-radius:10px;padding:10px 8px;">
+              <div style="font-size:11px;color:var(--muted);">${d.dateLabel}</div>
+              <div style="font-size:24px;margin:4px 0;">${d.emoji}</div>
+              <div style="font-size:12.5px;font-family:var(--font-mono);">${d.max}°/${d.min}°</div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `<div class="empty-state" style="margin-top:10px;">目前查得到的預報還沒到你的旅行日期，出發前幾天再回來看看吧</div>`}
     `;
+    function renderSingleDay(dateStr){
+      const singleEl = document.getElementById('weatherSingleDay');
+      const d = wdata.byDate[dateStr];
+      if(!d){
+        singleEl.innerHTML = `<div class="empty-state" style="padding:14px 0;">這天超出可查詢的範圍（大約前 5 天到後 16 天）</div>`;
+        return;
+      }
+      singleEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:14px;background:var(--paper);border:1px solid var(--border);border-radius:12px;padding:14px;">
+          <div style="font-size:40px;">${d.emoji}</div>
+          <div>
+            <div style="font-weight:600;font-size:14px;">${d.dateLabel} · ${esc(d.text)}</div>
+            <div style="font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);margin-top:2px;">最高 ${d.max}° / 最低 ${d.min}°</div>
+          </div>
+        </div>
+      `;
+    }
+    const datePickEl = document.getElementById('weatherDatePick');
+    datePickEl.onchange = ()=>renderSingleDay(datePickEl.value);
+    document.getElementById('weatherTodayBtn').onclick = ()=>{
+      const t = todayStr();
+      datePickEl.value = t;
+      renderSingleDay(t);
+    };
+    renderSingleDay(datePickEl.value);
   }catch(err){
     bodyEl.innerHTML = `<div class="empty-state">天氣資料載入失敗：${esc(err.message)}</div>`;
   }
@@ -998,6 +1103,23 @@ async function fetchRates(){
   if(data.result !== 'success') throw new Error('匯率資料取得失敗');
   ratesCache = {rates:data.rates, fetchedAt:now};
   return data.rates;
+}
+async function fillLiveRate(currencyEl, rateEl, btn){
+  const code = currencyEl.value;
+  if(code==='TWD'){ alert('新台幣不需要填匯率'); return; }
+  if(code==='OTHER'){ alert('這個幣別沒有即時匯率，請自行輸入'); return; }
+  const originalText = btn.textContent;
+  btn.disabled = true; btn.textContent = '抓取中…';
+  try{
+    const rates = await fetchRates();
+    const rate = rates[code];
+    if(!rate){ alert('查不到這個幣別的即時匯率，請自行輸入'); return; }
+    rateEl.value = (1/rate).toFixed(4);
+  }catch(err){
+    alert('抓取匯率失敗，請檢查網路連線：'+err.message);
+  }finally{
+    btn.disabled = false; btn.textContent = originalText;
+  }
 }
 function fmtNum(n, decimals){
   return Number(n||0).toLocaleString('zh-TW', {maximumFractionDigits: decimals==null?2:decimals});
@@ -1145,6 +1267,7 @@ async function renderItineraryTab(el){
   }
 
   el.innerHTML = `
+    <div id="weatherSection"></div>
     <div class="card">
       <h2>新增一天</h2>
       <form id="addDayForm">
@@ -1155,6 +1278,7 @@ async function renderItineraryTab(el){
     </div>
     <div id="daysList"></div>
   `;
+  renderWeatherSection();
 
   document.getElementById('addDayForm').onsubmit = async (e)=>{
     e.preventDefault();
@@ -1618,7 +1742,13 @@ async function renderExpensesTab(el){
         </div>
         <div class="field-row">
           <div class="field"><label>幣別</label>${currencySelectHTML('TWD', '', 'id="expCurrency"')}</div>
-          <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" id="expRate" min="0" step="0.0001" placeholder="1" disabled></div>
+          <div class="field">
+            <label>匯率（1 單位 = ? 台幣）</label>
+            <div style="display:flex;gap:6px;">
+              <input type="number" id="expRate" min="0" step="0.0001" placeholder="1" disabled style="flex:1;">
+              <button type="button" class="btn btn-outline" id="expRateLiveBtn" style="flex-shrink:0;padding:8px 12px;font-size:12.5px;white-space:nowrap;">抓即時匯率</button>
+            </div>
+          </div>
         </div>
         <div class="field hidden" id="expOtherCurrencyField"><label>幣別名稱</label><input type="text" id="expOtherCurrency" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
         <div class="field-row">
@@ -1710,6 +1840,7 @@ async function renderExpensesTab(el){
     expOtherFieldEl.classList.toggle('hidden', !isOther);
     if(!isOther) expOtherInputEl.value = '';
   };
+  document.getElementById('expRateLiveBtn').onclick = ()=>fillLiveRate(expCurrencyEl, expRateEl, document.getElementById('expRateLiveBtn'));
 
   document.getElementById('addExpenseForm').onsubmit = async (e)=>{
     e.preventDefault();
@@ -1759,7 +1890,13 @@ async function renderExpensesTab(el){
           </div>
           <div class="field-row">
             <div class="field"><label>幣別</label>${currencySelectHTML(exp.currency||'TWD', 'exp-e-currency')}</div>
-            <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" class="exp-e-rate" min="0" step="0.0001" value="${exp.currency && exp.currency!=='TWD' ? (exp.exchangeRate||'') : ''}" ${(!exp.currency || exp.currency==='TWD')?'disabled':''} placeholder="1"></div>
+              <div class="field">
+              <label>匯率（1 單位 = ? 台幣）</label>
+              <div style="display:flex;gap:6px;">
+                <input type="number" class="exp-e-rate" min="0" step="0.0001" value="${exp.currency && exp.currency!=='TWD' ? (exp.exchangeRate||'') : ''}" ${(!exp.currency || exp.currency==='TWD')?'disabled':''} placeholder="1" style="flex:1;">
+                <button type="button" class="btn btn-outline exp-e-rate-live" style="flex-shrink:0;padding:8px 12px;font-size:12.5px;white-space:nowrap;">抓即時匯率</button>
+              </div>
+            </div>
           </div>
           <div class="field exp-e-other-field ${exp.currency==='OTHER'?'':'hidden'}"><label>幣別名稱</label><input type="text" class="exp-e-other" value="${esc(exp.customCurrencyName||'')}" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
           <div class="field-row">
@@ -1786,6 +1923,7 @@ async function renderExpensesTab(el){
         otherFieldEditEl.classList.toggle('hidden', !isOther);
         if(!isOther) otherInputEditEl.value = '';
       };
+      formEl.querySelector('.exp-e-rate-live').onclick = ()=>fillLiveRate(currencyEditEl, rateEditEl, formEl.querySelector('.exp-e-rate-live'));
       formEl.querySelector('.exp-e-cancel').onclick = ()=>renderExpensesTab(el);
       formEl.querySelector('.exp-e-save').onclick = async ()=>{
         const title = formEl.querySelector('.exp-e-title').value.trim();
@@ -1857,7 +1995,6 @@ async function renderPersonalTab(el){
   }
 
   el.innerHTML = `
-    ${currencyToolCardHTML()}
     <div class="card">
       <h2>新增一筆記帳</h2>
       <form id="addRecordForm">
@@ -1867,7 +2004,13 @@ async function renderPersonalTab(el){
         </div>
         <div class="field-row">
           <div class="field"><label>幣別</label>${currencySelectHTML('TWD', '', 'id="recCurrency"')}</div>
-          <div class="field"><label>匯率（1 單位 = ? 台幣）</label><input type="number" id="recRate" min="0" step="0.0001" placeholder="1" disabled></div>
+          <div class="field">
+            <label>匯率（1 單位 = ? 台幣）</label>
+            <div style="display:flex;gap:6px;">
+              <input type="number" id="recRate" min="0" step="0.0001" placeholder="1" disabled style="flex:1;">
+              <button type="button" class="btn btn-outline" id="recRateLiveBtn" style="flex-shrink:0;padding:8px 12px;font-size:12.5px;white-space:nowrap;">抓即時匯率</button>
+            </div>
+          </div>
         </div>
         <div class="field hidden" id="recOtherCurrencyField"><label>幣別名稱</label><input type="text" id="recOtherCurrency" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
         <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="recDate" required></div></div>
@@ -1904,7 +2047,6 @@ async function renderPersonalTab(el){
   `;
 
   document.getElementById('recDate').value = todayStr();
-  bindCurrencyTool(el);
 
   const recCurrencyEl = document.getElementById('recCurrency');
   const recRateEl = document.getElementById('recRate');
@@ -1918,6 +2060,7 @@ async function renderPersonalTab(el){
     recOtherFieldEl.classList.toggle('hidden', !isOther);
     if(!isOther) recOtherInputEl.value = '';
   };
+  document.getElementById('recRateLiveBtn').onclick = ()=>fillLiveRate(recCurrencyEl, recRateEl, document.getElementById('recRateLiveBtn'));
 
   document.getElementById('addRecordForm').onsubmit = async (e)=>{
     e.preventDefault();
