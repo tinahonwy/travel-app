@@ -126,9 +126,12 @@
   .detail-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:13px;}
   .detail-row:last-of-type{border-bottom:none;}
   .detail-text{flex:1;min-width:0;word-break:break-word;}
-  .detail-add-form{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
-  .detail-add-form input{flex:1;min-width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--paper-card);color:var(--ink);}
-  .detail-add-form .btn{padding:8px 14px;font-size:12.5px;flex-shrink:0;}
+  .detail-add-form{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center;}
+  .detail-add-form input[type="text"],.detail-add-form input[type="url"]{flex:1;min-width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--paper-card);color:var(--ink);}
+  .detail-add-form .btn{padding:8px 14px;font-size:12.5px;flex-shrink:0;white-space:nowrap;}
+  .detail-memo-img{width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:zoom-in;flex-shrink:0;border:1px solid var(--border);}
+  .detail-img-preview-wrap{display:flex;align-items:center;gap:8px;}
+  .detail-img-preview{max-width:80px;max-height:80px;border-radius:8px;border:1px solid var(--border);object-fit:cover;}
 
   .balance-list{list-style:none;padding:0;margin:0;}
   .balance-list li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
@@ -712,14 +715,22 @@ function itemDetailHTML(item){
         <div data-memo-list>
         ${memos.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有備忘錄，例如注意事項、房號、櫃檯電話…</div>` : memos.map(m=>`
           <div class="detail-row">
-            <span class="detail-text">${esc(m.text)}</span>
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+              ${m.image ? `<img src="${m.image}" class="detail-memo-img" data-view-img title="點擊放大">` : ''}
+              ${m.text ? `<span class="detail-text">${esc(m.text)}</span>` : ''}
+            </div>
             <button class="btn-danger" data-del-memo="${m.id}">刪除</button>
           </div>
         `).join('')}
         </div>
         <form class="detail-add-form" data-add-memo>
-          <input type="text" class="detail-memo-input" placeholder="新增一條備忘錄">
+          <input type="text" class="detail-memo-input" placeholder="新增一條備忘錄（文字選填）">
+          <label class="btn btn-outline detail-img-btn">📷 加圖片<input type="file" accept="image/*" class="detail-memo-img-input" style="display:none"></label>
           <button type="submit" class="btn btn-outline">新增</button>
+          <div class="detail-img-preview-wrap hidden">
+            <img class="detail-img-preview">
+            <button type="button" class="btn-danger detail-img-clear">移除圖片</button>
+          </div>
         </form>
       </div>
       <div class="detail-section">
@@ -754,26 +765,61 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
   detailEl.querySelectorAll('[data-del-memo]').forEach(btn=>{
     btn.onclick = async ()=>{
       item.memos = (item.memos||[]).filter(m=>m.id!==btn.dataset.delMemo);
-      await collectionRef.doc(item.id).update({memos:item.memos});
       refresh();
+      try{ await collectionRef.doc(item.id).update({memos:item.memos}); }
+      catch(err){ alert('刪除備忘錄失敗，請檢查網路連線：'+err.message); }
     };
   });
   detailEl.querySelectorAll('[data-del-link]').forEach(btn=>{
     btn.onclick = async ()=>{
       item.links = (item.links||[]).filter(l=>l.id!==btn.dataset.delLink);
-      await collectionRef.doc(item.id).update({links:item.links});
       refresh();
+      try{ await collectionRef.doc(item.id).update({links:item.links}); }
+      catch(err){ alert('刪除連結失敗，請檢查網路連線：'+err.message); }
     };
   });
   const memoForm = detailEl.querySelector('[data-add-memo]');
+  let pendingMemoImage = null;
+  const memoImgInput = memoForm.querySelector('.detail-memo-img-input');
+  const memoPreviewWrap = memoForm.querySelector('.detail-img-preview-wrap');
+  const memoPreviewImg = memoForm.querySelector('.detail-img-preview');
+  memoImgInput.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 640;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale;
+        canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        pendingMemoImage = canvas.toDataURL('image/jpeg', 0.7);
+        memoPreviewImg.src = pendingMemoImage;
+        memoPreviewWrap.classList.remove('hidden');
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  memoForm.querySelector('.detail-img-clear').onclick = ()=>{
+    pendingMemoImage = null;
+    memoImgInput.value = '';
+    memoPreviewWrap.classList.add('hidden');
+  };
   memoForm.onsubmit = async (e)=>{
     e.preventDefault();
     const input = memoForm.querySelector('.detail-memo-input');
     const text = input.value.trim();
-    if(!text) return;
-    item.memos = [...(item.memos||[]), {id:genId(), text}];
-    await collectionRef.doc(item.id).update({memos:item.memos});
+    if(!text && !pendingMemoImage) return;
+    const newMemo = {id:genId(), text};
+    if(pendingMemoImage) newMemo.image = pendingMemoImage;
+    item.memos = [...(item.memos||[]), newMemo];
     refresh();
+    try{ await collectionRef.doc(item.id).update({memos:item.memos}); }
+    catch(err){ alert('儲存備忘錄失敗，請檢查網路連線：'+err.message); }
   };
   const linkForm = detailEl.querySelector('[data-add-link]');
   linkForm.onsubmit = async (e)=>{
@@ -782,8 +828,9 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
     const url = linkForm.querySelector('.detail-link-url').value.trim();
     if(!url) return;
     item.links = [...(item.links||[]), {id:genId(), label, url}];
-    await collectionRef.doc(item.id).update({links:item.links});
     refresh();
+    try{ await collectionRef.doc(item.id).update({links:item.links}); }
+    catch(err){ alert('儲存連結失敗，請檢查網路連線：'+err.message); }
   };
 }
 
@@ -1595,6 +1642,16 @@ async function renderMembersTab(el){
     </div>
   `;
 }
+
+document.addEventListener('click', (e)=>{
+  const img = e.target.closest('[data-view-img]');
+  if(!img) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<img src="${img.src}" style="max-width:100%;max-height:90vh;border-radius:12px;display:block;">`;
+  overlay.onclick = ()=>overlay.remove();
+  document.body.appendChild(overlay);
+});
 
 root.innerHTML = `<div class="empty-state">載入中…</div>`;
 </script>
