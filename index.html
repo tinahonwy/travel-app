@@ -112,20 +112,20 @@
   .item-row:last-child{border-bottom:none;}
   .item-time{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);width:auto;min-width:44px;max-width:78px;flex-shrink:0;padding-top:2px;line-height:1.4;}
   .item-body{flex:1;min-width:0;}
-  .item-title{font-weight:600;font-size:13.5px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;}
-  .item-title:hover{color:var(--vermillion);}
-  .detail-caret{font-size:10px;color:var(--muted);transition:transform .15s ease;}
+  .item-title{font-weight:600;font-size:13.5px;}
   .item-note{font-size:12.5px;color:var(--muted);margin-top:2px;}
   .item-link{font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-top:4px;}
   .item-link .link-ic{font-size:12px;line-height:1;}
+  .memo-trigger-btn{background:none;border:none;color:var(--matcha);font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:0;cursor:pointer;text-decoration:underline;font-family:var(--font-body);}
 
-  .item-detail{margin-top:10px;padding:12px;background:var(--paper);border:1px dashed var(--border);border-radius:10px;}
+  .item-detail{padding:0;}
   .detail-section{margin-bottom:12px;}
   .detail-section:last-child{margin-bottom:0;}
   .detail-section-head{font-size:11.5px;letter-spacing:.06em;color:var(--vermillion);font-weight:700;margin-bottom:6px;text-transform:uppercase;}
-  .detail-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:13px;}
+  .detail-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13px;}
   .detail-row:last-of-type{border-bottom:none;}
   .detail-text{flex:1;min-width:0;word-break:break-word;}
+  .detail-author{font-size:11px;color:var(--muted);}
   .detail-add-form{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center;}
   .detail-add-form input[type="text"],.detail-add-form input[type="url"]{flex:1;min-width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--paper-card);color:var(--ink);}
   .detail-add-form .btn{padding:8px 14px;font-size:12.5px;flex-shrink:0;white-space:nowrap;}
@@ -214,7 +214,6 @@ let currentTrip = null;
 let currentMembers = [];
 let activeTab = 'itinerary';
 let authMode = 'login';
-const expandedItemIds = new Set();
 
 const root = document.getElementById('root');
 const topBar = document.getElementById('topBar');
@@ -703,64 +702,68 @@ async function renderTabContent(){
   if(activeTab==='members') return renderMembersTab(el);
 }
 
-// ---------------- 行程項目「詳情」（備忘錄 / 多個連結） ----------------
+// ---------------- 行程項目「詳情」小視窗（備忘錄 / 多個連結） ----------------
 function itemDetailHTML(item){
   const memos = item.memos || [];
   const links = item.links || [];
-  const isOpen = expandedItemIds.has(item.id);
   return `
-    <div class="item-detail ${isOpen?'':'hidden'}" data-detail-for="${item.id}">
-      <div class="detail-section">
-        <div class="detail-section-head">備忘錄</div>
-        <div data-memo-list>
-        ${memos.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有備忘錄，例如注意事項、房號、櫃檯電話…</div>` : memos.map(m=>`
-          <div class="detail-row">
-            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+    <div class="detail-section">
+      <div class="detail-section-head">備忘錄</div>
+      <div data-memo-list>
+      ${memos.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有備忘錄，例如注意事項、房號、櫃檯電話…</div>` : memos.map(m=>`
+        <div class="detail-row">
+          <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;">
               ${m.image ? `<img src="${m.image}" class="detail-memo-img" data-view-img title="點擊放大">` : ''}
               ${m.text ? `<span class="detail-text">${esc(m.text)}</span>` : ''}
             </div>
-            <button class="btn-danger" data-del-memo="${m.id}">刪除</button>
+            ${m.authorName ? `<span class="detail-author">— ${esc(m.authorName)}</span>` : ''}
           </div>
-        `).join('')}
+          <button class="btn-danger" data-del-memo="${m.id}">刪除</button>
         </div>
-        <form class="detail-add-form" data-add-memo>
-          <input type="text" class="detail-memo-input" placeholder="新增一條備忘錄（文字選填）">
-          <label class="btn btn-outline detail-img-btn">📷 加圖片<input type="file" accept="image/*" class="detail-memo-img-input" style="display:none"></label>
-          <button type="submit" class="btn btn-outline">新增</button>
-          <div class="detail-img-preview-wrap hidden">
-            <img class="detail-img-preview">
-            <button type="button" class="btn-danger detail-img-clear">移除圖片</button>
-          </div>
-        </form>
+      `).join('')}
       </div>
-      <div class="detail-section">
-        <div class="detail-section-head">連結</div>
-        <div data-link-list>
-        ${links.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有連結，可以放地圖、訂房頁面、菜單…</div>` : links.map(l=>`
-          <div class="detail-row">
-            <a class="item-link" href="${esc(l.url)}" target="_blank" rel="noopener">${linkIconHTML(l.url)}${esc(l.label || '連結')} ↗</a>
-            <button class="btn-danger" data-del-link="${l.id}">刪除</button>
-          </div>
-        `).join('')}
+      <form class="detail-add-form" data-add-memo>
+        <input type="text" class="detail-memo-input" placeholder="新增一條備忘錄（文字選填）">
+        <label class="btn btn-outline detail-img-btn">📷 加圖片<input type="file" accept="image/*" class="detail-memo-img-input" style="display:none"></label>
+        <button type="submit" class="btn btn-outline">新增</button>
+        <div class="detail-img-preview-wrap hidden">
+          <img class="detail-img-preview">
+          <button type="button" class="btn-danger detail-img-clear">移除圖片</button>
         </div>
-        <form class="detail-add-form" data-add-link>
-          <input type="text" class="detail-link-label" placeholder="連結名稱（選填）">
-          <input type="url" class="detail-link-url" placeholder="https://..." required>
-          <button type="submit" class="btn btn-outline">新增</button>
-        </form>
+      </form>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-head">連結</div>
+      <div data-link-list>
+      ${links.length===0 ? `<div class="empty-state" style="padding:4px 0;font-size:12px;">還沒有連結，可以放地圖、訂房頁面、菜單…</div>` : links.map(l=>`
+        <div class="detail-row">
+          <a class="item-link" href="${esc(l.url)}" target="_blank" rel="noopener">${linkIconHTML(l.url)}${esc(l.label || '連結')} ↗</a>
+          <button class="btn-danger" data-del-link="${l.id}">刪除</button>
+        </div>
+      `).join('')}
       </div>
+      <form class="detail-add-form" data-add-link>
+        <input type="text" class="detail-link-label" placeholder="連結名稱（選填）">
+        <input type="url" class="detail-link-url" placeholder="https://..." required>
+        <button type="submit" class="btn btn-outline">新增</button>
+      </form>
     </div>
   `;
+}
+
+function mountItemDetail(collectionRef, item, scopeEl){
+  const detailEl = scopeEl.querySelector(`[data-detail-for="${item.id}"]`);
+  if(!detailEl) return;
+  detailEl.innerHTML = itemDetailHTML(item);
+  bindItemDetailHandlers(collectionRef, item, scopeEl);
 }
 
 function bindItemDetailHandlers(collectionRef, item, scopeEl){
   const detailEl = scopeEl.querySelector(`[data-detail-for="${item.id}"]`);
   if(!detailEl) return;
 
-  function refresh(){
-    detailEl.outerHTML = itemDetailHTML(item);
-    bindItemDetailHandlers(collectionRef, item, scopeEl);
-  }
+  function refresh(){ mountItemDetail(collectionRef, item, scopeEl); }
 
   detailEl.querySelectorAll('[data-del-memo]').forEach(btn=>{
     btn.onclick = async ()=>{
@@ -814,7 +817,11 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
     const input = memoForm.querySelector('.detail-memo-input');
     const text = input.value.trim();
     if(!text && !pendingMemoImage) return;
-    const newMemo = {id:genId(), text};
+    const newMemo = {
+      id:genId(), text,
+      authorUid: currentUser.uid,
+      authorName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員'
+    };
     if(pendingMemoImage) newMemo.image = pendingMemoImage;
     item.memos = [...(item.memos||[]), newMemo];
     refresh();
@@ -834,19 +841,22 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
   };
 }
 
-function bindDetailToggle(scopeEl){
-  scopeEl.querySelectorAll('[data-toggle-detail]').forEach(t=>{
-    t.onclick = ()=>{
-      const id = t.dataset.toggleDetail;
-      const detailEl = scopeEl.querySelector(`[data-detail-for="${id}"]`);
-      if(!detailEl) return;
-      const willOpen = detailEl.classList.contains('hidden');
-      if(willOpen){ expandedItemIds.add(id); } else { expandedItemIds.delete(id); }
-      detailEl.classList.toggle('hidden', !willOpen);
-      const caret = t.querySelector('.detail-caret');
-      if(caret) caret.textContent = willOpen ? '▴' : '▾';
-    };
-  });
+function openItemDetailModal(collectionRef, item){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:400px;">
+      <div class="modal-head">
+        <h3>${esc(item.title)}・備忘錄</h3>
+        <button class="modal-close" id="closeItemDetailModal">✕</button>
+      </div>
+      <div class="item-detail" data-detail-for="${item.id}"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#closeItemDetailModal').onclick = ()=>overlay.remove();
+  overlay.onclick = (ev)=>{ if(ev.target===overlay) overlay.remove(); };
+  mountItemDetail(collectionRef, item, overlay);
 }
 
 // ---------------- 行程規劃 ----------------
@@ -1039,10 +1049,10 @@ async function renderItemsFor(dayId){
     <div class="item-row" data-item-row="${it.id}">
       <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
       <div class="item-body">
-        <div class="item-title" data-toggle-detail="${it.id}">${esc(it.title)} <span class="detail-caret">${expandedItemIds.has(it.id)?'▴':'▾'}</span></div>
+        <div class="item-title">${esc(it.title)}</div>
         ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
         ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
-        ${itemDetailHTML(it)}
+        <div><button type="button" class="memo-trigger-btn" data-open-memo="${it.id}">📝 備忘錄${(it.memos&&it.memos.length)?`（${it.memos.length}）`:''}</button></div>
       </div>
       <div class="item-actions">
         <button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>
@@ -1050,13 +1060,16 @@ async function renderItemsFor(dayId){
       </div>
     </div>
   `).join('');
-  bindDetailToggle(container);
-  items.forEach(it=>bindItemDetailHandlers(collectionRef, it, container));
+  container.querySelectorAll('[data-open-memo]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const item = items.find(x=>x.id===btn.dataset.openMemo);
+      if(item) openItemDetailModal(collectionRef, item);
+    };
+  });
   container.querySelectorAll('[data-del-item]').forEach(btn=>{
     btn.onclick = async ()=>{
       if(!confirm('確定要刪除這筆行程嗎？')) return;
       await collectionRef.doc(btn.dataset.delItem).delete();
-      expandedItemIds.delete(btn.dataset.delItem);
       renderItemsFor(dayId);
     };
   });
@@ -1147,10 +1160,10 @@ async function renderOverviewItemsFor(dayId){
     <div class="item-row" data-item-row="${it.id}">
       <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
       <div class="item-body">
-        <div class="item-title" data-toggle-detail="ov-${it.id}">${esc(it.title)} <span class="detail-caret">${expandedItemIds.has('ov-'+it.id)?'▴':'▾'}</span></div>
+        <div class="item-title">${esc(it.title)}</div>
         ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
         ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
-        ${itemDetailHTML({...it, id:'ov-'+it.id, _realId:it.id})}
+        <div><button type="button" class="memo-trigger-btn" data-open-memo="${it.id}">📝 備忘錄${(it.memos&&it.memos.length)?`（${it.memos.length}）`:''}</button></div>
       </div>
       <div class="item-actions">
         <button class="item-btn item-btn-edit" data-ov-edit="${it.id}">編輯</button>
@@ -1159,18 +1172,17 @@ async function renderOverviewItemsFor(dayId){
     </div>
   `).join('');
 
-  bindDetailToggle(container);
-  items.forEach(it=>{
-    // use a wrapped collectionRef-like object so real doc id (not the "ov-" prefixed one) gets updated
-    const wrapped = { doc: (fakeId)=>collectionRef.doc(it.id) };
-    bindItemDetailHandlers(wrapped, {...it, id:'ov-'+it.id}, container);
+  container.querySelectorAll('[data-open-memo]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const item = items.find(x=>x.id===btn.dataset.openMemo);
+      if(item) openItemDetailModal(collectionRef, item);
+    };
   });
 
   container.querySelectorAll('[data-ov-del]').forEach(btn=>{
     btn.onclick = async ()=>{
       if(!confirm('確定要刪除這筆行程嗎？')) return;
       await collectionRef.doc(btn.dataset.ovDel).delete();
-      expandedItemIds.delete('ov-'+btn.dataset.ovDel);
       renderOverviewItemsFor(dayId);
     };
   });
