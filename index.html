@@ -1771,18 +1771,55 @@ function linkifyText(text){
 function postCardHTML(p){
   const author = memberOf(p.authorUid);
   const authorName = p.authorName || (author ? author.displayName : '未知成員');
+  const likes = p.likes || [];
+  const likedByMe = currentUser && likes.includes(currentUser.uid);
+  const commentCount = p.commentCount || 0;
   return `
     <div class="card" data-post-row="${p.id}">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         ${avatarChipHTML(author, 30)}
         <div style="min-width:0;">
           <div style="font-weight:600;font-size:13.5px;">${esc(authorName)}${isMe(p.authorUid)?'（我）':''}</div>
-          <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}</div>
+          <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}${p.editedAt ? '（已編輯）' : ''}</div>
         </div>
       </div>
       ${p.text ? `<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;${p.image?'margin-bottom:10px;':''}">${linkifyText(p.text)}</div>` : ''}
       ${p.image ? `<img src="${p.image}" data-view-img title="點擊放大" style="max-width:100%;max-height:360px;border-radius:10px;cursor:zoom-in;display:block;">` : ''}
-      ${isMe(p.authorUid) ? `<div style="text-align:right;margin-top:10px;"><button class="btn-danger" data-del-post="${p.id}">刪除這篇</button></div>` : ''}
+      <div style="display:flex;align-items:center;gap:18px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
+        <button type="button" class="post-like-btn" data-like-post="${p.id}" style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:13px;color:${likedByMe?'var(--vermillion)':'var(--muted)'};padding:0;">
+          <span style="font-size:16px;">${likedByMe?'❤️':'🤍'}</span><span class="post-like-count">${likes.length>0?likes.length:''}</span>
+        </button>
+        <button type="button" class="post-comment-toggle-btn" data-toggle-comments="${p.id}" style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:13px;color:var(--muted);padding:0;">
+          💬 <span class="post-comment-count-label">留言${commentCount?`（${commentCount}）`:''}</span>
+        </button>
+      </div>
+      <div class="post-comments-section hidden" data-comments-for="${p.id}"></div>
+      ${isMe(p.authorUid) ? `
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+          <button class="item-btn item-btn-edit" data-edit-post="${p.id}">編輯</button>
+          <button class="item-btn item-btn-del" data-del-post="${p.id}">刪除這篇</button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+function postEditFormHTML(p){
+  return `
+    <div class="edit-item-form" data-post-row="${p.id}">
+      <div class="field">
+        <textarea class="post-e-text" rows="4" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
+      </div>
+      <div class="field">
+        <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 更換照片<input type="file" class="post-e-img-input" accept="image/*" style="display:none"></label>
+        <div class="post-e-img-preview-wrap" style="margin-top:10px;display:${p.image?'flex':'none'};align-items:center;gap:8px;">
+          <img class="post-e-img-preview" src="${p.image||''}" style="max-width:120px;max-height:120px;border-radius:8px;border:1px solid var(--border);object-fit:cover;">
+          <button type="button" class="btn-danger post-e-img-clear">移除照片</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-accent post-e-save" style="flex:1">儲存</button>
+        <button type="button" class="btn btn-outline post-e-cancel">取消</button>
+      </div>
     </div>
   `;
 }
@@ -1869,7 +1906,9 @@ async function renderPostsTab(el){
         text,
         authorUid: currentUser.uid,
         authorName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        likes: [],
+        commentCount: 0
       };
       if(pendingPostImage) post.image = pendingPostImage;
       await db.collection('trips').doc(currentTrip.id).collection('posts').add(post);
@@ -1890,6 +1929,208 @@ async function renderPostsTab(el){
         renderPostsTab(el);
       }catch(err){
         alert('刪除失敗，請檢查網路連線：'+err.message);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-edit-post]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const post = posts.find(x=>x.id===btn.dataset.editPost);
+      if(!post) return;
+      const cardEl = document.querySelector(`.card[data-post-row="${post.id}"]`);
+      if(!cardEl) return;
+      cardEl.outerHTML = postEditFormHTML(post);
+      const formEl = document.querySelector(`.edit-item-form[data-post-row="${post.id}"]`);
+
+      let pendingImage = post.image || null;
+      let imageRemoved = false;
+      const imgInput = formEl.querySelector('.post-e-img-input');
+      const imgPreviewWrap = formEl.querySelector('.post-e-img-preview-wrap');
+      const imgPreview = formEl.querySelector('.post-e-img-preview');
+
+      imgInput.onchange = (e)=>{
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev)=>{
+          const img = new Image();
+          img.onload = ()=>{
+            const maxW = 900;
+            const scale = Math.min(1, maxW/img.width);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width*scale;
+            canvas.height = img.height*scale;
+            canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+            pendingImage = canvas.toDataURL('image/jpeg', 0.75);
+            imageRemoved = false;
+            imgPreview.src = pendingImage;
+            imgPreviewWrap.style.display = 'flex';
+          };
+          img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      };
+      formEl.querySelector('.post-e-img-clear').onclick = ()=>{
+        pendingImage = null;
+        imageRemoved = true;
+        imgInput.value = '';
+        imgPreviewWrap.style.display = 'none';
+      };
+      formEl.querySelector('.post-e-cancel').onclick = ()=>{ renderPostsTab(el); };
+      formEl.querySelector('.post-e-save').onclick = async ()=>{
+        const text = formEl.querySelector('.post-e-text').value.trim();
+        if(!text && !pendingImage){ alert('請輸入文字或加一張照片'); return; }
+        const saveBtn = formEl.querySelector('.post-e-save');
+        saveBtn.disabled = true; saveBtn.textContent = '儲存中…';
+        try{
+          const updateData = {
+            text,
+            editedAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          if(pendingImage){
+            updateData.image = pendingImage;
+          } else if(imageRemoved){
+            updateData.image = firebase.firestore.FieldValue.delete();
+          }
+          await db.collection('trips').doc(currentTrip.id).collection('posts').doc(post.id).update(updateData);
+          clearTabCache('posts');
+          renderPostsTab(el);
+        }catch(err){
+          alert('儲存失敗，請檢查網路連線：'+err.message);
+          saveBtn.disabled = false; saveBtn.textContent = '儲存';
+        }
+      };
+    };
+  });
+
+  // ---- 按讚 ----
+  function updateLikeButtonUI(postId, post){
+    const btn = document.querySelector(`[data-like-post="${postId}"]`);
+    if(!btn) return;
+    const likes = post.likes || [];
+    const liked = currentUser && likes.includes(currentUser.uid);
+    btn.style.color = liked ? 'var(--vermillion)' : 'var(--muted)';
+    btn.querySelector('span').textContent = liked ? '❤️' : '🤍';
+    btn.querySelector('.post-like-count').textContent = likes.length>0 ? likes.length : '';
+  }
+  document.querySelectorAll('[data-like-post]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const postId = btn.dataset.likePost;
+      const post = posts.find(x=>x.id===postId);
+      if(!post) return;
+      const likes = post.likes || [];
+      const liked = likes.includes(currentUser.uid);
+      // 先更新畫面，操作起來更即時，失敗的話再復原
+      post.likes = liked ? likes.filter(u=>u!==currentUser.uid) : [...likes, currentUser.uid];
+      updateLikeButtonUI(postId, post);
+      try{
+        await db.collection('trips').doc(currentTrip.id).collection('posts').doc(postId).update({
+          likes: liked
+            ? firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
+            : firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+        });
+      }catch(err){
+        post.likes = likes; // 復原
+        updateLikeButtonUI(postId, post);
+        alert('操作失敗，請檢查網路連線：'+err.message);
+      }
+    };
+  });
+
+  // ---- 留言 ----
+  function updateCommentToggleUI(postId, post){
+    const label = document.querySelector(`[data-toggle-comments="${postId}"] .post-comment-count-label`);
+    if(!label) return;
+    const count = post ? (post.commentCount||0) : 0;
+    label.textContent = `留言${count?`（${count}）`:''}`;
+  }
+  function commentRowHTML(c){
+    return `
+      <div class="detail-row" data-comment-row="${c.id}" style="padding:6px 0;">
+        <div style="flex:1;min-width:0;word-break:break-word;">
+          <span style="font-weight:600;font-size:12.5px;">${esc(c.authorName||'未知成員')}</span>
+          <span style="font-size:12.5px;color:var(--ink);margin-left:6px;">${esc(c.text)}</span>
+        </div>
+        ${isMe(c.authorUid) ? `<button class="btn-danger" data-del-comment="${c.id}">刪除</button>` : ''}
+      </div>
+    `;
+  }
+  async function loadAndRenderComments(postId, section){
+    section.innerHTML = `<div class="empty-state" style="padding:10px 0;font-size:12px;">載入留言中…</div>`;
+    let comments;
+    try{
+      const snap = await db.collection('trips').doc(currentTrip.id).collection('posts').doc(postId).collection('comments').orderBy('createdAt','asc').get();
+      comments = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    }catch(err){
+      section.innerHTML = `<div class="empty-state" style="padding:10px 0;font-size:12px;">留言載入失敗：${esc(err.message)}</div>`;
+      return;
+    }
+    section.innerHTML = `
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">
+        <div data-comment-list>
+          ${comments.length===0 ? `<div class="empty-state" style="padding:6px 0;font-size:12px;">還沒有留言，第一個留言吧</div>` : comments.map(commentRowHTML).join('')}
+        </div>
+        <form class="add-comment-form" style="display:flex;gap:6px;margin-top:8px;">
+          <input type="text" class="comment-input" placeholder="留個言…" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--paper-card);color:var(--ink);">
+          <button type="submit" class="btn btn-outline" style="padding:8px 14px;font-size:12.5px;flex-shrink:0;">送出</button>
+        </form>
+      </div>
+    `;
+    section.querySelectorAll('[data-del-comment]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if(!confirm('確定要刪除這則留言嗎？')) return;
+        try{
+          await db.collection('trips').doc(currentTrip.id).collection('posts').doc(postId).collection('comments').doc(btn.dataset.delComment).delete();
+          await db.collection('trips').doc(currentTrip.id).collection('posts').doc(postId).update({
+            commentCount: firebase.firestore.FieldValue.increment(-1)
+          });
+          const post = posts.find(x=>x.id===postId);
+          if(post) post.commentCount = Math.max(0, (post.commentCount||0)-1);
+          updateCommentToggleUI(postId, post);
+          loadAndRenderComments(postId, section);
+        }catch(err){
+          alert('刪除失敗，請檢查網路連線：'+err.message);
+        }
+      };
+    });
+    section.querySelector('.add-comment-form').onsubmit = async (e)=>{
+      e.preventDefault();
+      const input = section.querySelector('.comment-input');
+      const text = input.value.trim();
+      if(!text) return;
+      const submitBtn = section.querySelector('.add-comment-form button[type="submit"]');
+      submitBtn.disabled = true;
+      try{
+        await db.collection('trips').doc(currentTrip.id).collection('posts').doc(postId).collection('comments').add({
+          text,
+          authorUid: currentUser.uid,
+          authorName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await db.collection('trips').doc(currentTrip.id).collection('posts').doc(postId).update({
+          commentCount: firebase.firestore.FieldValue.increment(1)
+        });
+        const post = posts.find(x=>x.id===postId);
+        if(post) post.commentCount = (post.commentCount||0)+1;
+        updateCommentToggleUI(postId, post);
+        await loadAndRenderComments(postId, section);
+      }catch(err){
+        alert('留言失敗，請檢查網路連線：'+err.message);
+        submitBtn.disabled = false;
+      }
+    };
+  }
+  document.querySelectorAll('[data-toggle-comments]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const postId = btn.dataset.toggleComments;
+      const section = document.querySelector(`[data-comments-for="${postId}"]`);
+      if(!section) return;
+      const isHidden = section.classList.contains('hidden');
+      if(isHidden){
+        section.classList.remove('hidden');
+        await loadAndRenderComments(postId, section);
+      } else {
+        section.classList.add('hidden');
       }
     };
   });
