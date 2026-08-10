@@ -1766,9 +1766,19 @@ async function renderPostsTab(el){
   const cacheKey = tabCacheKey('posts');
   let posts = tabDataCache[cacheKey];
   if(!posts){
-    const snap = await db.collection('trips').doc(currentTrip.id).collection('posts').orderBy('createdAt','desc').get();
-    posts = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    tabDataCache[cacheKey] = posts;
+    try{
+      const snap = await db.collection('trips').doc(currentTrip.id).collection('posts').orderBy('createdAt','desc').get();
+      posts = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      tabDataCache[cacheKey] = posts;
+    }catch(err){
+      el.innerHTML = `
+        <div class="card">
+          <h2>⚠️ 貼文載入失敗</h2>
+          <p class="subtitle" style="margin-bottom:0;">錯誤訊息：${esc(err.message)}</p>
+        </div>
+      `;
+      return;
+    }
   }
   el.innerHTML = `
     <div class="card">
