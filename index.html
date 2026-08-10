@@ -179,6 +179,19 @@
 
   .trip-code{font-family:var(--font-mono);font-size:12.5px;background:var(--paper);border:1px dashed var(--border);padding:6px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:8px;color:var(--ink-soft);margin-bottom:18px;max-width:100%;flex-wrap:wrap;word-break:break-all;}
 
+  /* 共同行程 / 私人行程 兩欄排版：主行程在左邊，私人行程在旁邊（側欄） */
+  .items-columns{display:flex;gap:14px;align-items:flex-start;}
+  .items-columns .items-main{flex:1;min-width:0;}
+  .items-columns .items-side{flex:0 0 42%;min-width:150px;max-width:260px;border-left:2px dashed var(--border);padding-left:14px;}
+  .items-side-head{font-size:11.5px;letter-spacing:.04em;color:var(--matcha);font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:4px;}
+  .item-row.item-row-private{background:#FBF8F1;border-radius:8px;padding:9px 8px;border-bottom:1px dashed var(--border);}
+  .item-private-tag{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--matcha);background:#E8EFDD;padding:1px 7px;border-radius:999px;margin-top:4px;}
+  .private-visibility-box{background:var(--paper);}
+  @media (max-width:640px){
+    .items-columns{flex-direction:column;}
+    .items-columns .items-side{flex:1;max-width:none;border-left:none;border-top:2px dashed var(--border);padding-left:0;padding-top:10px;margin-top:4px;}
+  }
+
   @media (max-width:600px){
     .container{padding:20px 12px 60px;}
     .field-row{flex-direction:column;gap:0;}
@@ -384,6 +397,53 @@ function endMinOptionsHTML(){ return `<option value="">不填</option>` + minOpt
 function isMapLink(url){
   if(!url) return false;
   return /google\.[a-z.]+\/maps|maps\.google\.|maps\.app\.goo\.gl|goo\.gl\/maps|\/maps\?|^https?:\/\/maps\./i.test(url);
+}
+// ------------------------------------------------------------
+// 私人行程可見性
+// ------------------------------------------------------------
+function canSeeItem(item){
+  if(!item || item.visibility !== 'private') return true;
+  if(!currentUser) return false;
+  if(item.authorUid === currentUser.uid) return true;
+  return (item.visibleTo || []).includes(currentUser.uid);
+}
+function visibilityMemberCheckboxesHTML(className, selectedUids){
+  const sel = selectedUids || [];
+  const others = currentMembers.filter(m=>!isMe(m.uid));
+  if(others.length===0) return `<p class="subtitle" style="margin:0;font-size:12px;">目前沒有其他團員可以選擇</p>`;
+  return others.map(m=>`
+    <label class="checkbox-row"><input type="checkbox" class="${className}" value="${m.uid}" ${sel.includes(m.uid)?'checked':''}> ${avatarChipHTML(m,18)}${esc(m.displayName)}</label>
+  `).join('');
+}
+function privateToggleFormHTML(prefix, item){
+  const isPrivate = item && item.visibility === 'private';
+  const visibleTo = item ? (item.visibleTo || []) : [];
+  return `
+    <label class="checkbox-row" style="margin-top:6px;">
+      <input type="checkbox" class="${prefix}-private-toggle" ${isPrivate?'checked':''}> 🔒 設為私人行程（只有你選的人看得到）
+    </label>
+    <div class="private-visibility-box field ${isPrivate?'':'hidden'}" style="margin:2px 0 12px;padding:10px;border:1px dashed var(--border);border-radius:8px;">
+      <p class="subtitle" style="margin:0 0 6px;font-size:12px;">除了你自己，還有誰可以看到這筆行程？</p>
+      <div class="${prefix}-visible-to-list">${visibilityMemberCheckboxesHTML(prefix+'-visible-to', visibleTo)}</div>
+    </div>
+  `;
+}
+function bindPrivateToggle(scopeEl, prefix){
+  const toggle = scopeEl.querySelector(`.${prefix}-private-toggle`);
+  const box = scopeEl.querySelector('.private-visibility-box');
+  if(!toggle || !box) return;
+  toggle.onchange = ()=>{ box.classList.toggle('hidden', !toggle.checked); };
+}
+function readPrivateFields(scopeEl, prefix){
+  const isPrivate = scopeEl.querySelector(`.${prefix}-private-toggle`) ? scopeEl.querySelector(`.${prefix}-private-toggle`).checked : false;
+  const visibleTo = isPrivate ? [...scopeEl.querySelectorAll(`.${prefix}-visible-to:checked`)].map(cb=>cb.value) : [];
+  return { visibility: isPrivate ? 'private' : 'shared', visibleTo };
+}
+function itemPrivateTagHTML(item){
+  if(item.visibility !== 'private') return '';
+  const others = (item.visibleTo||[]).map(uid=>nameOf(uid));
+  const who = others.length ? `你、${others.join('、')}` : '只有你';
+  return `<div class="item-private-tag" title="${esc(who)}">🔒 私人（${esc(who)}看得到）</div>`;
 }
 // ------------------------------------------------------------
 // 幣別
@@ -1365,6 +1425,7 @@ async function renderItineraryTab(el){
           <label>連結（選填）</label>
           <input type="url" class="i-link" placeholder="Google Maps、訂位頁面…">
         </div>
+        ${privateToggleFormHTML('i')}
         <div style="display:flex;gap:8px">
           <button type="submit" class="btn btn-accent" style="flex:1">加入這筆行程</button>
           <button type="button" class="btn btn-outline cancel-add-item" data-day-id="${d.id}">取消</button>
@@ -1425,6 +1486,7 @@ async function renderItineraryTab(el){
   });
 
   daysListEl.querySelectorAll('.add-item-form').forEach(form=>{
+    bindPrivateToggle(form, 'i');
     form.onsubmit = async (e)=>{
       e.preventDefault();
       const dayId = form.dataset.addItemFor;
@@ -1434,6 +1496,7 @@ async function renderItineraryTab(el){
       const endHourVal = card.querySelector('.i-end-hour').value;
       const endMinVal = card.querySelector('.i-end-min').value;
       const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
+      const priv = readPrivateFields(form, 'i');
       const item = {
         time: `${hourVal}:${minVal}`,
         endTime,
@@ -1441,7 +1504,10 @@ async function renderItineraryTab(el){
         note: card.querySelector('.i-note').value.trim(),
         link: card.querySelector('.i-link').value.trim(),
         memos: [],
-        links: []
+        links: [],
+        visibility: priv.visibility,
+        visibleTo: priv.visibleTo,
+        authorUid: currentUser.uid
       };
       await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).collection('items').add(item);
       clearTabCache('items', dayId);
@@ -1455,6 +1521,25 @@ async function renderItineraryTab(el){
   for(const d of days){ renderItemsFor(d.id); }
 }
 
+function itineraryItemRowHTML(it){
+  return `
+    <div class="item-row ${it.visibility==='private' ? 'item-row-private' : ''}" data-item-row="${it.id}">
+      <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
+      <div class="item-body">
+        <div class="item-title">${esc(it.title)}</div>
+        ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
+        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
+        <div><button type="button" class="memo-trigger-btn" data-open-memo="${it.id}">📝 備忘錄${(it.memos&&it.memos.length)?`（${it.memos.length}）`:''}</button></div>
+        ${itemPrivateTagHTML(it)}
+      </div>
+      <div class="item-actions">
+        <button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>
+        <button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>
+      </div>
+    </div>
+  `;
+}
+
 async function renderItemsFor(dayId){
   const container = document.querySelector(`[data-items-for="${dayId}"]`);
   if(!container) return;
@@ -1466,25 +1551,26 @@ async function renderItemsFor(dayId){
     items = snap.docs.map(d=>({id:d.id, ...d.data()}));
     tabDataCache[cacheKey] = items;
   }
-  if(items.length===0){
+  const visibleItems = items.filter(canSeeItem);
+  if(visibleItems.length===0){
     container.innerHTML = `<div class="empty-state" style="padding:14px 0">這天還沒有排行程</div>`;
     return;
   }
-  container.innerHTML = items.map(it=>`
-    <div class="item-row" data-item-row="${it.id}">
-      <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
-      <div class="item-body">
-        <div class="item-title">${esc(it.title)}</div>
-        ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
-        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
-        <div><button type="button" class="memo-trigger-btn" data-open-memo="${it.id}">📝 備忘錄${(it.memos&&it.memos.length)?`（${it.memos.length}）`:''}</button></div>
+  const sharedItems = visibleItems.filter(it=>it.visibility!=='private');
+  const privateItems = visibleItems.filter(it=>it.visibility==='private');
+  container.innerHTML = `
+    <div class="items-columns">
+      <div class="items-main">
+        ${sharedItems.length===0 ? `<div class="empty-state" style="padding:14px 0">這天還沒有共同行程</div>` : sharedItems.map(itineraryItemRowHTML).join('')}
       </div>
-      <div class="item-actions">
-        <button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>
-        <button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>
-      </div>
+      ${privateItems.length>0 ? `
+        <div class="items-side">
+          <div class="items-side-head">🔒 私人行程</div>
+          ${privateItems.map(itineraryItemRowHTML).join('')}
+        </div>
+      ` : ''}
     </div>
-  `).join('');
+  `;
   container.querySelectorAll('[data-open-memo]').forEach(btn=>{
     btn.onclick = ()=>{
       const item = items.find(x=>x.id===btn.dataset.openMemo);
@@ -1519,6 +1605,7 @@ async function renderItemsFor(dayId){
           </div>
           <div class="field"><label>備註（選填）</label><input type="text" class="it-note" value="${esc(item.note||'')}"></div>
           <div class="field"><label>連結（選填）</label><input type="url" class="it-link" value="${esc(item.link||'')}"></div>
+          ${privateToggleFormHTML('it', item)}
           <div style="display:flex;gap:8px">
             <button class="btn btn-accent it-save" style="flex:1">儲存</button>
             <button class="btn btn-outline it-cancel">取消</button>
@@ -1526,6 +1613,7 @@ async function renderItemsFor(dayId){
         </div>
       `;
       const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
+      bindPrivateToggle(formEl, 'it');
       formEl.querySelector('.it-cancel').onclick = ()=>renderItemsFor(dayId);
       formEl.querySelector('.it-save').onclick = async ()=>{
         const hourVal = formEl.querySelector('.it-hour').value;
@@ -1535,12 +1623,16 @@ async function renderItemsFor(dayId){
         const endMinVal = formEl.querySelector('.it-end-min').value;
         const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
+        const priv = readPrivateFields(formEl, 'it');
         await collectionRef.doc(item.id).update({
           time: `${hourVal}:${minVal}`,
           endTime,
           title,
           note: formEl.querySelector('.it-note').value.trim(),
-          link: formEl.querySelector('.it-link').value.trim()
+          link: formEl.querySelector('.it-link').value.trim(),
+          visibility: priv.visibility,
+          visibleTo: priv.visibleTo,
+          authorUid: item.authorUid || currentUser.uid
         });
         clearTabCache('items', dayId);
         renderItemsFor(dayId);
@@ -1589,25 +1681,26 @@ async function renderOverviewItemsFor(dayId){
     items = snap.docs.map(d=>({id:d.id, ...d.data()}));
     tabDataCache[cacheKey] = items;
   }
-  if(items.length===0){
+  const visibleItems = items.filter(canSeeItem);
+  if(visibleItems.length===0){
     container.innerHTML = `<div class="empty-state" style="padding:14px 0">這天還沒有排行程</div>`;
     return;
   }
-  container.innerHTML = items.map(it=>`
-    <div class="item-row" data-item-row="${it.id}">
-      <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
-      <div class="item-body">
-        <div class="item-title">${esc(it.title)}</div>
-        ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
-        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
-        <div><button type="button" class="memo-trigger-btn" data-open-memo="${it.id}">📝 備忘錄${(it.memos&&it.memos.length)?`（${it.memos.length}）`:''}</button></div>
+  const sharedItems = visibleItems.filter(it=>it.visibility!=='private');
+  const privateItems = visibleItems.filter(it=>it.visibility==='private');
+  container.innerHTML = `
+    <div class="items-columns">
+      <div class="items-main">
+        ${sharedItems.length===0 ? `<div class="empty-state" style="padding:14px 0">這天還沒有共同行程</div>` : sharedItems.map(itineraryItemRowHTML).join('')}
       </div>
-      <div class="item-actions">
-        <button class="item-btn item-btn-edit" data-ov-edit="${it.id}">編輯</button>
-        <button class="item-btn item-btn-del" data-ov-del="${it.id}">刪除</button>
-      </div>
+      ${privateItems.length>0 ? `
+        <div class="items-side">
+          <div class="items-side-head">🔒 私人行程</div>
+          ${privateItems.map(itineraryItemRowHTML).join('')}
+        </div>
+      ` : ''}
     </div>
-  `).join('');
+  `;
 
   container.querySelectorAll('[data-open-memo]').forEach(btn=>{
     btn.onclick = ()=>{
@@ -1616,18 +1709,18 @@ async function renderOverviewItemsFor(dayId){
     };
   });
 
-  container.querySelectorAll('[data-ov-del]').forEach(btn=>{
+  container.querySelectorAll('[data-del-item]').forEach(btn=>{
     btn.onclick = async ()=>{
       if(!confirm('確定要刪除這筆行程嗎？')) return;
-      await collectionRef.doc(btn.dataset.ovDel).delete();
+      await collectionRef.doc(btn.dataset.delItem).delete();
       clearTabCache('items', dayId);
       renderOverviewItemsFor(dayId);
     };
   });
 
-  container.querySelectorAll('[data-ov-edit]').forEach(btn=>{
+  container.querySelectorAll('[data-item-edit]').forEach(btn=>{
     btn.onclick = ()=>{
-      const item = items.find(x=>x.id===btn.dataset.ovEdit);
+      const item = items.find(x=>x.id===btn.dataset.itemEdit);
       const row = container.querySelector(`[data-item-row="${item.id}"]`);
       const [h, m] = (item.time||'00:00').split(':');
       const [eh, em] = item.endTime ? item.endTime.split(':') : ['',''];
@@ -1645,6 +1738,7 @@ async function renderOverviewItemsFor(dayId){
           </div>
           <div class="field"><label>備註（選填）</label><input type="text" class="ov-note" value="${esc(item.note||'')}"></div>
           <div class="field"><label>連結（選填）</label><input type="url" class="ov-link" value="${esc(item.link||'')}"></div>
+          ${privateToggleFormHTML('ov', item)}
           <div style="display:flex;gap:8px">
             <button class="btn btn-accent ov-save" style="flex:1">儲存</button>
             <button class="btn btn-outline ov-cancel">取消</button>
@@ -1652,6 +1746,7 @@ async function renderOverviewItemsFor(dayId){
         </div>
       `;
       const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
+      bindPrivateToggle(formEl, 'ov');
       formEl.querySelector('.ov-cancel').onclick = ()=>renderOverviewItemsFor(dayId);
       formEl.querySelector('.ov-save').onclick = async ()=>{
         const hourVal = formEl.querySelector('.ov-hour').value;
@@ -1661,12 +1756,16 @@ async function renderOverviewItemsFor(dayId){
         const endMinVal = formEl.querySelector('.ov-end-min').value;
         const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
+        const priv = readPrivateFields(formEl, 'ov');
         await collectionRef.doc(item.id).update({
           time: `${hourVal}:${minVal}`,
           endTime,
           title,
           note: formEl.querySelector('.ov-note').value.trim(),
-          link: formEl.querySelector('.ov-link').value.trim()
+          link: formEl.querySelector('.ov-link').value.trim(),
+          visibility: priv.visibility,
+          visibleTo: priv.visibleTo,
+          authorUid: item.authorUid || currentUser.uid
         });
         clearTabCache('items', dayId);
         renderOverviewItemsFor(dayId);
