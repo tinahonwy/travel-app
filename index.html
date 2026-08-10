@@ -372,6 +372,21 @@ function fmt(n){ return Number(n||0).toLocaleString('zh-TW', {maximumFractionDig
 function nameOf(uid){ const m = currentMembers.find(m=>m.uid===uid); return m ? m.displayName : '未知成員'; }
 function isMe(uid){ return currentUser && uid === currentUser.uid; }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
+function addDaysToDateStr(dateStr, delta){
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0,10);
+}
+// 猜一個「新增一天」時最合理的預設日期：接續在已建立天數的最後一天之後；
+// 如果還沒建立任何一天，就從行程的出發日開始。只是預設值，不會限制使用者改選別的日期。
+function suggestNextDayDate(days){
+  if(days && days.length>0){
+    const maxDate = days.reduce((max,d)=> (d.date && d.date>max) ? d.date : max, days[0].date || '');
+    if(maxDate) return addDaysToDateStr(maxDate, 1);
+  }
+  if(currentTrip && currentTrip.startDate) return currentTrip.startDate;
+  return todayStr();
+}
 function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 function weekdayLabel(dateStr){
@@ -717,7 +732,7 @@ async function openTrip(tripId){
       displayName: data.displayName || data.email || '未命名成員'
     });
   }
-  activeTab = 'itinerary';
+  activeTab = 'overview';
   await renderTripDetailView();
 }
 
@@ -742,8 +757,8 @@ async function renderTripDetailView(){
       <div id="tabContent"></div>
     </div>
     <div class="tabbar"><div class="tabbar-inner">
-      <button class="tab-btn" data-tab="itinerary"><span class="tab-ic">🗓️</span>行程規劃</button>
       <button class="tab-btn" data-tab="overview"><span class="tab-ic">📋</span>行程總覽</button>
+      <button class="tab-btn" data-tab="itinerary"><span class="tab-ic">🗓️</span>行程規劃</button>
       <button class="tab-btn" data-tab="expenses"><span class="tab-ic">💰</span>一起出錢</button>
       <button class="tab-btn" data-tab="personal"><span class="tab-ic">📝</span>我的記帳</button>
       <button class="tab-btn" data-tab="members"><span class="tab-ic">👥</span>團員</button>
@@ -1349,6 +1364,7 @@ async function renderItineraryTab(el){
     </div>
     <div id="daysList"></div>
   `;
+  document.getElementById('dayDate').value = suggestNextDayDate(days);
   renderWeatherSection();
 
   document.getElementById('addDayForm').onsubmit = async (e)=>{
@@ -1650,11 +1666,19 @@ async function renderOverviewTab(el){
     days = snap.docs.map(d=>({id:d.id, ...d.data()}));
     tabDataCache[cacheKey] = days;
   }
+  const bannerHTML = `
+    <div class="card" style="border-left:4px solid var(--matcha);background:#F5F8F0;">
+      <h2 style="margin-bottom:6px;">📋 這是唯讀的行程總覽</h2>
+      <p class="subtitle" style="margin-bottom:10px;">依時間排序整理成一條時間軸，方便旅行中滑手機快速查看「等一下要去哪」，也會顯示你看得到的私人行程。想要新增一天、調整時間或修改內容，請切換到「行程規劃」分頁。</p>
+      <button type="button" class="btn btn-outline" id="goToPlanningBtn" style="width:auto;padding:8px 16px;font-size:13px;">前往行程規劃 →</button>
+    </div>
+  `;
   if(days.length===0){
-    el.innerHTML = `<div class="empty-state">還沒有安排任何行程，先到「行程規劃」新增一天吧</div>`;
+    el.innerHTML = bannerHTML + `<div class="empty-state">還沒有安排任何行程，先到「行程規劃」新增一天吧</div>`;
+    document.getElementById('goToPlanningBtn').onclick = ()=>{ activeTab='itinerary'; updateTabUI(); renderTabContent(); };
     return;
   }
-  el.innerHTML = days.map(d=>`
+  el.innerHTML = bannerHTML + days.map(d=>`
     <div class="card">
       <div class="day-block-inner">
         <div class="day-weekday">${weekdayLabel(d.date)}</div>
@@ -1667,7 +1691,23 @@ async function renderOverviewTab(el){
       </div>
     </div>
   `).join('');
+  document.getElementById('goToPlanningBtn').onclick = ()=>{ activeTab='itinerary'; updateTabUI(); renderTabContent(); };
   for(const d of days){ renderOverviewItemsFor(d.id); }
+}
+
+function overviewItemRowHTML(it){
+  return `
+    <div class="item-row ${it.visibility==='private' ? 'item-row-private' : ''}" data-item-row="${it.id}">
+      <div class="item-time">${it.time||''}${it.endTime ? `<br>-${it.endTime}` : ''}</div>
+      <div class="item-body">
+        <div class="item-title">${esc(it.title)}</div>
+        ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
+        ${it.link ? `<a class="item-link" href="${esc(it.link)}" target="_blank" rel="noopener">${linkIconHTML(it.link)}相關連結 ↗</a>` : ''}
+        <div><button type="button" class="memo-trigger-btn" data-open-memo="${it.id}">📝 備忘錄${(it.memos&&it.memos.length)?`（${it.memos.length}）`:''}</button></div>
+        ${itemPrivateTagHTML(it)}
+      </div>
+    </div>
+  `;
 }
 
 async function renderOverviewItemsFor(dayId){
@@ -1681,95 +1721,18 @@ async function renderOverviewItemsFor(dayId){
     items = snap.docs.map(d=>({id:d.id, ...d.data()}));
     tabDataCache[cacheKey] = items;
   }
+  // items 已經依時間排序，過濾可見性後順序不變，所以共同／私人行程可以合併成單一時間軸
   const visibleItems = items.filter(canSeeItem);
   if(visibleItems.length===0){
     container.innerHTML = `<div class="empty-state" style="padding:14px 0">這天還沒有排行程</div>`;
     return;
   }
-  const sharedItems = visibleItems.filter(it=>it.visibility!=='private');
-  const privateItems = visibleItems.filter(it=>it.visibility==='private');
-  container.innerHTML = `
-    <div class="items-columns">
-      <div class="items-main">
-        ${sharedItems.length===0 ? `<div class="empty-state" style="padding:14px 0">這天還沒有共同行程</div>` : sharedItems.map(itineraryItemRowHTML).join('')}
-      </div>
-      ${privateItems.length>0 ? `
-        <div class="items-side">
-          <div class="items-side-head">🔒 私人行程</div>
-          ${privateItems.map(itineraryItemRowHTML).join('')}
-        </div>
-      ` : ''}
-    </div>
-  `;
+  container.innerHTML = visibleItems.map(overviewItemRowHTML).join('');
 
   container.querySelectorAll('[data-open-memo]').forEach(btn=>{
     btn.onclick = ()=>{
       const item = items.find(x=>x.id===btn.dataset.openMemo);
       if(item) openItemDetailModal(collectionRef, item);
-    };
-  });
-
-  container.querySelectorAll('[data-del-item]').forEach(btn=>{
-    btn.onclick = async ()=>{
-      if(!confirm('確定要刪除這筆行程嗎？')) return;
-      await collectionRef.doc(btn.dataset.delItem).delete();
-      clearTabCache('items', dayId);
-      renderOverviewItemsFor(dayId);
-    };
-  });
-
-  container.querySelectorAll('[data-item-edit]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const item = items.find(x=>x.id===btn.dataset.itemEdit);
-      const row = container.querySelector(`[data-item-row="${item.id}"]`);
-      const [h, m] = (item.time||'00:00').split(':');
-      const [eh, em] = item.endTime ? item.endTime.split(':') : ['',''];
-      row.outerHTML = `
-        <div class="edit-item-form" data-item-row="${item.id}">
-          <div class="field-row">
-            <div class="field" style="flex:0 0 96px"><label>時</label><select class="ov-hour">${hourOptionsHTML().replace(`value="${h}"`, `value="${h}" selected`)}</select></div>
-            <div class="field" style="flex:0 0 96px"><label>分</label><select class="ov-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
-            <div class="field" style="flex:1 1 180px"><label>要去哪裡／做什麼</label><input type="text" class="ov-title" value="${esc(item.title)}" required></div>
-          </div>
-          <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
-          <div class="field-row">
-            <div class="field" style="flex:0 0 96px"><label>結束時</label><select class="ov-end-hour">${eh ? endHourOptionsHTML().replace(`value="${eh}"`, `value="${eh}" selected`) : endHourOptionsHTML()}</select></div>
-            <div class="field" style="flex:0 0 96px"><label>結束分</label><select class="ov-end-min">${em ? endMinOptionsHTML().replace(`value="${em}"`, `value="${em}" selected`) : endMinOptionsHTML()}</select></div>
-          </div>
-          <div class="field"><label>備註（選填）</label><input type="text" class="ov-note" value="${esc(item.note||'')}"></div>
-          <div class="field"><label>連結（選填）</label><input type="url" class="ov-link" value="${esc(item.link||'')}"></div>
-          ${privateToggleFormHTML('ov', item)}
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-accent ov-save" style="flex:1">儲存</button>
-            <button class="btn btn-outline ov-cancel">取消</button>
-          </div>
-        </div>
-      `;
-      const formEl = container.querySelector(`[data-item-row="${item.id}"]`);
-      bindPrivateToggle(formEl, 'ov');
-      formEl.querySelector('.ov-cancel').onclick = ()=>renderOverviewItemsFor(dayId);
-      formEl.querySelector('.ov-save').onclick = async ()=>{
-        const hourVal = formEl.querySelector('.ov-hour').value;
-        const minVal = formEl.querySelector('.ov-min').value;
-        const title = formEl.querySelector('.ov-title').value.trim();
-        const endHourVal = formEl.querySelector('.ov-end-hour').value;
-        const endMinVal = formEl.querySelector('.ov-end-min').value;
-        const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
-        if(!title){ alert('請輸入標題'); return; }
-        const priv = readPrivateFields(formEl, 'ov');
-        await collectionRef.doc(item.id).update({
-          time: `${hourVal}:${minVal}`,
-          endTime,
-          title,
-          note: formEl.querySelector('.ov-note').value.trim(),
-          link: formEl.querySelector('.ov-link').value.trim(),
-          visibility: priv.visibility,
-          visibleTo: priv.visibleTo,
-          authorUid: item.authorUid || currentUser.uid
-        });
-        clearTabCache('items', dayId);
-        renderOverviewItemsFor(dayId);
-      };
     };
   });
 }
