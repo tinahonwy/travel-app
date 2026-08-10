@@ -1744,6 +1744,30 @@ function formatPostTime(ts){
   const d = ts.toDate();
   return d.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
 }
+// 把純文字裡的網址自動轉成可以點擊的連結（先安全跳脫文字，再插入連結標籤，避免 XSS）
+function linkifyText(text){
+  if(!text) return '';
+  const urlRegex = /(https?:\/\/[^\s<>"']+)/gi;
+  const trailingPunct = /[.,;:!?)\]}]+$/;
+  let result = '';
+  let lastIndex = 0;
+  let match;
+  while((match = urlRegex.exec(text)) !== null){
+    let url = match[0];
+    let trailing = '';
+    const trailMatch = url.match(trailingPunct);
+    if(trailMatch){
+      trailing = trailMatch[0];
+      url = url.slice(0, url.length - trailing.length);
+    }
+    result += esc(text.slice(lastIndex, match.index));
+    result += `<a href="${esc(url)}" target="_blank" rel="noopener">${linkIconHTML(url)}${esc(url)}</a>`;
+    result += esc(trailing);
+    lastIndex = match.index + match[0].length;
+  }
+  result += esc(text.slice(lastIndex));
+  return result;
+}
 function postCardHTML(p){
   const author = memberOf(p.authorUid);
   const authorName = p.authorName || (author ? author.displayName : '未知成員');
@@ -1756,7 +1780,7 @@ function postCardHTML(p){
           <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}</div>
         </div>
       </div>
-      ${p.text ? `<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;${p.image?'margin-bottom:10px;':''}">${esc(p.text)}</div>` : ''}
+      ${p.text ? `<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;${p.image?'margin-bottom:10px;':''}">${linkifyText(p.text)}</div>` : ''}
       ${p.image ? `<img src="${p.image}" data-view-img title="點擊放大" style="max-width:100%;max-height:360px;border-radius:10px;cursor:zoom-in;display:block;">` : ''}
       ${isMe(p.authorUid) ? `<div style="text-align:right;margin-top:10px;"><button class="btn-danger" data-del-post="${p.id}">刪除這篇</button></div>` : ''}
     </div>
