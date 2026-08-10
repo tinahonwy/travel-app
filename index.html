@@ -540,7 +540,18 @@ auth.onAuthStateChanged(async (user)=>{
     }
     renderTopBar();
     currentTrip = null;
-    await renderTripsView();
+    if(currentProfile.defaultTripId){
+      let opened = false;
+      try{ opened = await openTrip(currentProfile.defaultTripId); }catch(e){ opened = false; }
+      if(!opened){
+        // 預設行程可能被刪除了，或你已經不是團員了，自動清掉這個設定避免下次又卡住
+        try{ await db.collection('users').doc(user.uid).update({ defaultTripId: firebase.firestore.FieldValue.delete() }); }catch(e){}
+        delete currentProfile.defaultTripId;
+        await renderTripsView();
+      }
+    } else {
+      await renderTripsView();
+    }
   } else {
     topBar.classList.add('hidden');
     authMode = 'login';
@@ -632,7 +643,8 @@ async function renderTripsView(){
       <h1>我的旅行</h1>
       <p class="subtitle">選一個行程繼續規劃，或建立新的旅行</p>
 
-      <h2 style="margin-bottom:12px">行程清單</h2>
+      <h2 style="margin-bottom:2px">行程清單</h2>
+      <p class="subtitle" style="margin-bottom:12px">點卡片右上角的星星，把行程設為預設，下次打開網頁會直接進去，不用再找</p>
       <div id="tripList"><div class="empty-state">載入中…</div></div>
 
       <div class="wave-divider" style="margin:24px 0"></div>
@@ -703,24 +715,48 @@ async function renderTripsView(){
     listEl.innerHTML = `<div class="empty-state">還沒有任何行程，建立一個開始規劃吧</div>`;
     return;
   }
-  listEl.innerHTML = trips.map(t=>`
-    <div class="card card-row" style="cursor:pointer;border-left:4px solid var(--vermillion);padding:22px 20px;" data-trip-id="${t.id}">
+  listEl.innerHTML = trips.map(t=>{
+    const isDefault = currentProfile && currentProfile.defaultTripId === t.id;
+    return `
+    <div class="card card-row" style="cursor:pointer;border-left:4px solid var(--vermillion);padding:22px 20px;position:relative;" data-trip-id="${t.id}">
+      <button type="button" class="pin-trip-btn" data-pin-trip="${t.id}" title="${isDefault?'取消預設':'設為預設，下次直接打開這個行程'}" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:20px;line-height:1;padding:6px;color:${isDefault?'var(--vermillion)':'var(--muted)'};">${isDefault?'★':'☆'}</button>
       <div>
-        <h1 style="margin-bottom:4px;font-size:22px;">${esc(t.name)}</h1>
+        <h1 style="margin-bottom:4px;font-size:22px;">${esc(t.name)}${isDefault?' <span style="font-size:11px;font-weight:600;color:var(--vermillion);vertical-align:middle;">預設</span>':''}</h1>
         <p class="subtitle" style="margin:0">${t.startDate} → ${t.endDate} · ${t.members.length} 位成員</p>
       </div>
       <span class="btn btn-accent" style="pointer-events:none;flex-shrink:0">查看 →</span>
     </div>
-  `).join('');
+  `;}).join('');
   listEl.querySelectorAll('[data-trip-id]').forEach(card=>{
     card.onclick = ()=>openTrip(card.dataset.tripId);
+  });
+  listEl.querySelectorAll('[data-pin-trip]').forEach(btn=>{
+    btn.onclick = async (e)=>{
+      e.stopPropagation();
+      const tripId = btn.dataset.pinTrip;
+      const isCurrentlyDefault = currentProfile && currentProfile.defaultTripId === tripId;
+      try{
+        if(isCurrentlyDefault){
+          await db.collection('users').doc(currentUser.uid).update({ defaultTripId: firebase.firestore.FieldValue.delete() });
+          delete currentProfile.defaultTripId;
+        } else {
+          await db.collection('users').doc(currentUser.uid).update({ defaultTripId: tripId });
+          currentProfile.defaultTripId = tripId;
+        }
+        renderTripsView();
+      }catch(err){
+        showMsg('tripsMsgBox', '設定失敗：'+err.message);
+      }
+    };
   });
 }
 
 async function openTrip(tripId){
   const snap = await db.collection('trips').doc(tripId).get();
-  if(!snap.exists) return;
-  currentTrip = {id:snap.id, ...snap.data()};
+  if(!snap.exists) return false;
+  const tripData = {id:snap.id, ...snap.data()};
+  if(!tripData.members || !tripData.members.includes(currentUser.uid)) return false; // 不是這個行程的團員了
+  currentTrip = tripData;
   const uniqueUids = [...new Set(currentTrip.members)];
   // 平行抓取所有團員資料，而不是一個一個等，減少開啟行程時的等待時間
   const memberSnaps = await Promise.all(uniqueUids.map(uid=>db.collection('users').doc(uid).get()));
@@ -735,6 +771,7 @@ async function openTrip(tripId){
   });
   activeTab = 'overview';
   await renderTripDetailView();
+  return true;
 }
 
 // ==============================================================
