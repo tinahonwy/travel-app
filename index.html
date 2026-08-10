@@ -2223,20 +2223,107 @@ async function renderPersonalTab(el){
 
 // ---------------- 團員 ----------------
 async function renderMembersTab(el){
+  const isOwner = isMe(currentTrip.ownerId);
   el.innerHTML = `
+    <div id="membersMsgBox"></div>
     <div class="card">
       <h2>團員名單</h2>
-      <ul class="balance-list">
-        ${currentMembers.map(m=>`
-          <li>
-            <span style="display:flex;align-items:center;">${avatarChipHTML(m,24)}${esc(m.displayName)}${isMe(m.uid)?'（我）':''}${m.uid===currentTrip.ownerId?' · 發起人':''}</span>
-            <span class="amount-neutral">${esc(m.email||'')}</span>
+      <ul class="balance-list" id="memberListUl">
+        ${currentMembers.map(m=>{
+          const canManage = isOwner && m.uid !== currentTrip.ownerId;
+          return `
+          <li data-member-uid="${m.uid}">
+            <span style="display:flex;align-items:center;min-width:0;">
+              ${avatarChipHTML(m,24)}
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.displayName)}${isMe(m.uid)?'（我）':''}${m.uid===currentTrip.ownerId?' · 發起人':''}</span>
+            </span>
+            <span style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
+              <span class="amount-neutral" style="font-size:11px;word-break:break-all;text-align:right;">${esc(m.email||'')}</span>
+              ${canManage ? `
+                <span style="display:flex;gap:6px;">
+                  <button class="btn-danger" style="color:var(--matcha)" data-transfer-owner="${m.uid}">設為發起人</button>
+                  <button class="btn-danger" data-remove-member="${m.uid}">移除</button>
+                </span>
+              ` : ''}
+            </span>
           </li>
-        `).join('')}
+        `;}).join('')}
       </ul>
       <p class="subtitle" style="margin-top:14px">把行程代碼「<strong>${currentTrip.id}</strong>」分享給朋友，他們就可以加入這趟旅行。</p>
     </div>
+    <div class="card">
+      <h2>離開這趟旅行</h2>
+      ${isOwner
+        ? (currentMembers.length>1
+            ? `<p class="subtitle" style="margin-bottom:0">你是發起人，請先把「發起人」身份轉移給其他團員，才能退出這個團。</p>`
+            : `<p class="subtitle" style="margin-bottom:12px">目前只有你一個人在這個行程裡，退出等於刪除整個行程，且無法復原。</p>
+               <button class="btn btn-outline btn-block" id="deleteTripBtn" style="border-color:var(--danger);color:var(--danger);">刪除這個行程</button>`)
+        : `<p class="subtitle" style="margin-bottom:12px">退出後就看不到這個行程了，其他團員的資料不會受影響。</p>
+           <button class="btn btn-outline btn-block" id="leaveTripBtn" style="border-color:var(--danger);color:var(--danger);">退出這個團</button>`
+      }
+    </div>
   `;
+
+  el.querySelectorAll('[data-transfer-owner]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const uid = btn.dataset.transferOwner;
+      if(!confirm(`確定要把發起人身份轉移給 ${nameOf(uid)} 嗎？轉移後你就不能再移除團員或轉移身份了。`)) return;
+      try{
+        await db.collection('trips').doc(currentTrip.id).update({ ownerId: uid });
+        currentTrip.ownerId = uid;
+        renderMembersTab(el);
+      }catch(err){
+        showMsg('membersMsgBox', '轉移失敗：'+err.message);
+      }
+    };
+  });
+
+  el.querySelectorAll('[data-remove-member]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const uid = btn.dataset.removeMember;
+      if(!confirm(`確定要把 ${nameOf(uid)} 移出這個行程嗎？`)) return;
+      try{
+        await db.collection('trips').doc(currentTrip.id).update({
+          members: firebase.firestore.FieldValue.arrayRemove(uid)
+        });
+        currentTrip.members = (currentTrip.members||[]).filter(u=>u!==uid);
+        currentMembers = currentMembers.filter(m=>m.uid!==uid);
+        renderMembersTab(el);
+      }catch(err){
+        showMsg('membersMsgBox', '移除失敗：'+err.message);
+      }
+    };
+  });
+
+  const leaveBtn = document.getElementById('leaveTripBtn');
+  if(leaveBtn){
+    leaveBtn.onclick = async ()=>{
+      if(!confirm('確定要退出這個團嗎？')) return;
+      try{
+        await db.collection('trips').doc(currentTrip.id).update({
+          members: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
+        });
+        currentTrip = null;
+        renderTripsView();
+      }catch(err){
+        showMsg('membersMsgBox', '退出失敗：'+err.message);
+      }
+    };
+  }
+
+  const deleteBtn = document.getElementById('deleteTripBtn');
+  if(deleteBtn){
+    deleteBtn.onclick = async ()=>{
+      if(!confirm('確定要刪除這個行程嗎？這個動作無法復原。')) return;
+      try{
+        await db.collection('trips').doc(currentTrip.id).delete();
+        currentTrip = null;
+        renderTripsView();
+      }catch(err){
+        showMsg('membersMsgBox', '刪除失敗：'+err.message);
+      }
+    };
+  }
 }
 
 document.addEventListener('click', (e)=>{
