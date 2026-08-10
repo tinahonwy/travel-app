@@ -721,17 +721,18 @@ async function openTrip(tripId){
   const snap = await db.collection('trips').doc(tripId).get();
   if(!snap.exists) return;
   currentTrip = {id:snap.id, ...snap.data()};
-  currentMembers = [];
   const uniqueUids = [...new Set(currentTrip.members)];
-  for(const uid of uniqueUids){
-    const uSnap = await db.collection('users').doc(uid).get();
+  // 平行抓取所有團員資料，而不是一個一個等，減少開啟行程時的等待時間
+  const memberSnaps = await Promise.all(uniqueUids.map(uid=>db.collection('users').doc(uid).get()));
+  currentMembers = uniqueUids.map((uid,i)=>{
+    const uSnap = memberSnaps[i];
     const data = uSnap.exists ? uSnap.data() : {};
-    currentMembers.push({
+    return {
       uid,
       ...data,
       displayName: data.displayName || data.email || '未命名成員'
-    });
-  }
+    };
+  });
   activeTab = 'overview';
   await renderTripDetailView();
 }
@@ -759,8 +760,8 @@ async function renderTripDetailView(){
     <div class="tabbar"><div class="tabbar-inner">
       <button class="tab-btn" data-tab="overview"><span class="tab-ic">📋</span>行程總覽</button>
       <button class="tab-btn" data-tab="itinerary"><span class="tab-ic">🗓️</span>行程規劃</button>
-      <button class="tab-btn" data-tab="expenses"><span class="tab-ic">💰</span>一起出錢</button>
-      <button class="tab-btn" data-tab="personal"><span class="tab-ic">📝</span>我的記帳</button>
+      <button class="tab-btn" data-tab="posts"><span class="tab-ic">📣</span>攻略／貼文</button>
+      <button class="tab-btn" data-tab="money"><span class="tab-ic">💰</span>金錢管理</button>
       <button class="tab-btn" data-tab="members"><span class="tab-ic">👥</span>團員</button>
     </div></div>
   `;
@@ -838,8 +839,8 @@ async function renderTabContent(){
   el.innerHTML = `<div class="empty-state">載入中…</div>`;
   if(activeTab==='itinerary') return renderItineraryTab(el);
   if(activeTab==='overview') return renderOverviewTab(el);
-  if(activeTab==='expenses') return renderExpensesTab(el);
-  if(activeTab==='personal') return renderPersonalTab(el);
+  if(activeTab==='posts') return renderPostsTab(el);
+  if(activeTab==='money') return renderMoneyTab(el);
   if(activeTab==='members') return renderMembersTab(el);
 }
 
@@ -1735,6 +1736,145 @@ async function renderOverviewItemsFor(dayId){
       if(item) openItemDetailModal(collectionRef, item);
     };
   });
+}
+
+// ---------------- 攻略／貼文（共同貼文牆） ----------------
+function formatPostTime(ts){
+  if(!ts || typeof ts.toDate !== 'function') return '剛剛發布';
+  const d = ts.toDate();
+  return d.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+}
+function postCardHTML(p){
+  const author = memberOf(p.authorUid);
+  const authorName = p.authorName || (author ? author.displayName : '未知成員');
+  return `
+    <div class="card" data-post-row="${p.id}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        ${avatarChipHTML(author, 30)}
+        <div style="min-width:0;">
+          <div style="font-weight:600;font-size:13.5px;">${esc(authorName)}${isMe(p.authorUid)?'（我）':''}</div>
+          <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}</div>
+        </div>
+      </div>
+      ${p.text ? `<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;${p.image?'margin-bottom:10px;':''}">${esc(p.text)}</div>` : ''}
+      ${p.image ? `<img src="${p.image}" data-view-img title="點擊放大" style="max-width:100%;max-height:360px;border-radius:10px;cursor:zoom-in;display:block;">` : ''}
+      ${isMe(p.authorUid) ? `<div style="text-align:right;margin-top:10px;"><button class="btn-danger" data-del-post="${p.id}">刪除這篇</button></div>` : ''}
+    </div>
+  `;
+}
+async function renderPostsTab(el){
+  const cacheKey = tabCacheKey('posts');
+  let posts = tabDataCache[cacheKey];
+  if(!posts){
+    const snap = await db.collection('trips').doc(currentTrip.id).collection('posts').orderBy('createdAt','desc').get();
+    posts = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    tabDataCache[cacheKey] = posts;
+  }
+  el.innerHTML = `
+    <div class="card">
+      <h2>✏️ 發表新貼文</h2>
+      <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
+      <form id="addPostForm">
+        <div class="field">
+          <textarea id="postText" rows="4" placeholder="想跟大家分享什麼？" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);"></textarea>
+        </div>
+        <div class="field">
+          <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填）<input type="file" id="postImageInput" accept="image/*" style="display:none"></label>
+          <div id="postImagePreviewWrap" class="hidden" style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+            <img id="postImagePreview" style="max-width:120px;max-height:120px;border-radius:8px;border:1px solid var(--border);object-fit:cover;">
+            <button type="button" class="btn-danger" id="postImageClearBtn">移除照片</button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-accent btn-block">發布</button>
+      </form>
+    </div>
+    <div id="postsList">
+      ${posts.length===0 ? `<div class="empty-state">還沒有人發文，來寫第一篇攻略吧</div>` : posts.map(postCardHTML).join('')}
+    </div>
+  `;
+
+  let pendingPostImage = null;
+  const postImageInput = document.getElementById('postImageInput');
+  const postImagePreviewWrap = document.getElementById('postImagePreviewWrap');
+  const postImagePreview = document.getElementById('postImagePreview');
+  postImageInput.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 900;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale;
+        canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        pendingPostImage = canvas.toDataURL('image/jpeg', 0.75);
+        postImagePreview.src = pendingPostImage;
+        postImagePreviewWrap.classList.remove('hidden');
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('postImageClearBtn').onclick = ()=>{
+    pendingPostImage = null;
+    postImageInput.value = '';
+    postImagePreviewWrap.classList.add('hidden');
+  };
+
+  document.getElementById('addPostForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const text = document.getElementById('postText').value.trim();
+    if(!text && !pendingPostImage){ alert('請輸入文字或加一張照片'); return; }
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; submitBtn.textContent = '發布中…';
+    try{
+      const post = {
+        text,
+        authorUid: currentUser.uid,
+        authorName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if(pendingPostImage) post.image = pendingPostImage;
+      await db.collection('trips').doc(currentTrip.id).collection('posts').add(post);
+      clearTabCache('posts');
+      renderPostsTab(el);
+    }catch(err){
+      alert('發布失敗，請檢查網路連線：'+err.message);
+      submitBtn.disabled = false; submitBtn.textContent = '發布';
+    }
+  };
+
+  document.querySelectorAll('[data-del-post]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      if(!confirm('確定要刪除這篇貼文嗎？')) return;
+      try{
+        await db.collection('trips').doc(currentTrip.id).collection('posts').doc(btn.dataset.delPost).delete();
+        clearTabCache('posts');
+        renderPostsTab(el);
+      }catch(err){
+        alert('刪除失敗，請檢查網路連線：'+err.message);
+      }
+    };
+  });
+}
+
+// ---------------- 金錢管理（整合一起出錢 + 我的記帳） ----------------
+async function renderMoneyTab(el){
+  el.innerHTML = `
+    <div class="card" style="border-left:4px solid var(--vermillion);">
+      <h2 style="margin-bottom:4px;">💰 金錢管理</h2>
+      <p class="subtitle" style="margin-bottom:0;">這裡整合了「大家一起分攤的花費」跟「你自己的消費記帳」。</p>
+    </div>
+    <h2 style="margin:20px 0 10px;">🤝 一起出錢</h2>
+    <div id="moneySharedSection"></div>
+    <h2 style="margin:28px 0 10px;">📝 我的記帳</h2>
+    <div id="moneyPersonalSection"></div>
+  `;
+  await renderExpensesTab(document.getElementById('moneySharedSection'));
+  await renderPersonalTab(document.getElementById('moneyPersonalSection'));
 }
 
 // ---------------- 一起出錢（共同分帳） ----------------
