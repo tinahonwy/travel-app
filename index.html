@@ -718,13 +718,15 @@ async function renderTripsView(){
   listEl.innerHTML = trips.map(t=>{
     const isDefault = currentProfile && currentProfile.defaultTripId === t.id;
     return `
-    <div class="card card-row" style="cursor:pointer;border-left:4px solid var(--vermillion);padding:22px 20px;position:relative;" data-trip-id="${t.id}">
-      <button type="button" class="pin-trip-btn" data-pin-trip="${t.id}" title="${isDefault?'取消預設':'設為預設，下次直接打開這個行程'}" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:20px;line-height:1;padding:6px;color:${isDefault?'var(--vermillion)':'var(--muted)'};">${isDefault?'★':'☆'}</button>
+    <div class="card card-row" style="cursor:pointer;border-left:4px solid var(--vermillion);padding:22px 20px;" data-trip-id="${t.id}">
       <div>
         <h1 style="margin-bottom:4px;font-size:22px;">${esc(t.name)}${isDefault?' <span style="font-size:11px;font-weight:600;color:var(--vermillion);vertical-align:middle;">預設</span>':''}</h1>
         <p class="subtitle" style="margin:0">${t.startDate} → ${t.endDate} · ${t.members.length} 位成員</p>
       </div>
-      <span class="btn btn-accent" style="pointer-events:none;flex-shrink:0">查看 →</span>
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+        <button type="button" class="pin-trip-btn" data-pin-trip="${t.id}" title="${isDefault?'取消預設':'設為預設，下次直接打開這個行程'}" style="background:none;border:none;cursor:pointer;font-size:20px;line-height:1;padding:4px;color:${isDefault?'var(--vermillion)':'var(--muted)'};">${isDefault?'★':'☆'}</button>
+        <span class="btn btn-accent" style="pointer-events:none;">查看 →</span>
+      </div>
     </div>
   `;}).join('');
   listEl.querySelectorAll('[data-trip-id]').forEach(card=>{
