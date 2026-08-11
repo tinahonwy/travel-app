@@ -200,8 +200,9 @@
   .pack-progress{font-size:12px;color:var(--muted);margin-bottom:10px;}
   .pack-category-block{margin-bottom:16px;}
   .pack-category-block:last-child{margin-bottom:0;}
-  .pack-category-title{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;font-weight:700;color:var(--matcha);background:#E8EFDD;padding:5px 10px;border-radius:6px;margin-bottom:2px;}
-  .pack-category-title .pack-category-count{font-weight:400;font-size:11.5px;color:var(--muted);}
+  .pack-category-title{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;font-weight:700;padding:5px 10px;border-radius:6px;margin-bottom:2px;}
+  .pack-category-title .pack-category-count{font-weight:400;font-size:11.5px;opacity:.75;}
+  .pack-row.pack-row-colored{border-left:3px solid transparent;padding-left:8px;}
   .pack-category-select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);}
 
   @media (max-width:600px){
@@ -1803,6 +1804,32 @@ const DEFAULT_PACK_CATEGORIES = [
 ];
 const NEW_CATEGORY_VALUE = '__new_category__';
 
+// 預設分類給固定的、好記的顏色；自訂分類則用名稱算出一個固定顏色（同一個名字每次都會拿到同一個顏色）
+const CATEGORY_COLOR_MAP = {
+  '📄 出入境用品':       {bg:'#E3ECF5', text:'#2C5C8A'},
+  '🔌 電子用品':         {bg:'#EDEAF5', text:'#5B4B8A'},
+  '🧴 盥洗用品':         {bg:'#E1F0EC', text:'#2E7D6B'},
+  '👕 衣物':             {bg:'#FDEAF0', text:'#B23A6B'},
+  '💊 藥品／醫療用品':   {bg:'#FBEAEA', text:'#B3261E'},
+  '🩸 生理用品':         {bg:'#F3E8F7', text:'#7A3E9D'},
+  '🎁 伴手禮／購物清單': {bg:'#FDF1E3', text:'#B5651D'},
+  '💎 貴重物品':         {bg:'#FFF6D9', text:'#8A6D00'},
+  '📦 其他':             {bg:'#EFEAE0', text:'#8A7A5C'}
+};
+const CATEGORY_COLOR_FALLBACK_PALETTE = [
+  {bg:'#E3ECF5', text:'#2C5C8A'}, {bg:'#EDEAF5', text:'#5B4B8A'},
+  {bg:'#E1F0EC', text:'#2E7D6B'}, {bg:'#FDEAF0', text:'#B23A6B'},
+  {bg:'#FBEAEA', text:'#B3261E'}, {bg:'#F3E8F7', text:'#7A3E9D'},
+  {bg:'#FDF1E3', text:'#B5651D'}, {bg:'#FFF6D9', text:'#8A6D00'},
+  {bg:'#E4F0FA', text:'#1B6FA8'}, {bg:'#EAF5E0', text:'#4C8C2E'}
+];
+function categoryColor(name){
+  if(CATEGORY_COLOR_MAP[name]) return CATEGORY_COLOR_MAP[name];
+  let h = 0;
+  for(let i=0;i<name.length;i++){ h = (h*31 + name.charCodeAt(i)) % 997; }
+  return CATEGORY_COLOR_FALLBACK_PALETTE[h % CATEGORY_COLOR_FALLBACK_PALETTE.length];
+}
+
 function packCategorySelectOptionsHTML(categories, selected){
   const opts = categories.map(c=>`<option value="${esc(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('');
   return opts + `<option value="${NEW_CATEGORY_VALUE}">＋ 新增自訂類別…</option>`;
@@ -1903,15 +1930,16 @@ async function renderPackingSection(el){
     listEl.innerHTML = order.filter(c=>grouped[c] && grouped[c].length>0).map(cat=>{
       const catItems = grouped[cat];
       const packedInCat = catItems.filter(it=>it.packed).length;
+      const color = categoryColor(cat);
       return `
         <div class="pack-category-block" data-pack-cat="${esc(cat)}">
-          <div class="pack-category-title">
+          <div class="pack-category-title" style="background:${color.bg};color:${color.text};">
             <span>${esc(cat)}</span>
             <span class="pack-category-count">${packedInCat} / ${catItems.length}</span>
           </div>
           ${catItems.map(it=>`
-            <div class="pack-row ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}">
-              <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" ${it.packed?'checked':''}>
+            <div class="pack-row pack-row-colored ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}" style="border-left-color:${color.bg};">
+              <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" style="accent-color:${color.text};" ${it.packed?'checked':''}>
               <span class="pack-item-name">${esc(it.name)}</span>
               <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
             </div>
