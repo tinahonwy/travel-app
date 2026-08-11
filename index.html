@@ -1864,12 +1864,22 @@ async function renderPackingSection(el){
   const collectionRef = db.collection('trips').doc(currentTrip.id).collection('packingItems');
   const catDocRef = db.collection('trips').doc(currentTrip.id).collection('packingCategories').doc(currentUser.uid);
 
+  let loadError = false;
   if(!items){
     try{
-      const snap = await collectionRef.where('userId','==', currentUser.uid).orderBy('createdAt','asc').get();
+      // 只用 where 篩選，不加 orderBy：where(userId) + orderBy(createdAt) 這種組合查詢需要先在 Firestore
+      // 建立複合索引才能用，沒建立的話查詢會直接失敗；改成抓回來後在瀏覽器端自己排序，就不需要額外的索引
+      const snap = await collectionRef.where('userId','==', currentUser.uid).get();
       items = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      items.sort((a,b)=>{
+        const ta = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : 0;
+        const tb = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().getTime() : 0;
+        return ta - tb;
+      });
     }catch(err){
       items = [];
+      loadError = err.message || '未知錯誤';
+      console.error('打包清單載入失敗：', err);
     }
     tabDataCache[itemsCacheKey] = items;
   }
@@ -1916,7 +1926,9 @@ async function renderPackingSection(el){
     const packedCount = items.filter(it=>it.packed).length;
     progressEl.textContent = items.length===0 ? '' : `已打包 ${packedCount} / ${items.length} 項`;
     if(items.length===0){
-      listEl.innerHTML = `<div class="empty-state" style="padding:14px 0;">還沒有加入任何物品，開始列你的打包清單吧</div>`;
+      listEl.innerHTML = loadError
+        ? `<div class="empty-state" style="color:var(--danger);padding:14px 0;">清單載入失敗：${esc(loadError)}</div>`
+        : `<div class="empty-state" style="padding:14px 0;">還沒有加入任何物品，開始列你的打包清單吧</div>`;
       return;
     }
     // 依分類分組，順序：預設分類 → 自訂分類 → 其他曾經用過的分類；分類內依加入時間排序
