@@ -192,6 +192,13 @@
     .items-columns .items-side{flex:1;max-width:none;border-left:none;border-top:2px dashed var(--border);padding-left:0;padding-top:10px;margin-top:4px;}
   }
 
+  .pack-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border);}
+  .pack-row:last-child{border-bottom:none;}
+  .pack-row.packed .pack-item-name{text-decoration:line-through;color:var(--muted);}
+  .pack-check{width:20px;height:20px;accent-color:var(--matcha);cursor:pointer;flex-shrink:0;}
+  .pack-item-name{flex:1;min-width:0;word-break:break-word;font-size:13.5px;}
+  .pack-progress{font-size:12px;color:var(--muted);margin-bottom:10px;}
+
   @media (max-width:600px){
     .container{padding:20px 12px 60px;}
     .field-row{flex-direction:column;gap:0;}
@@ -1777,6 +1784,108 @@ async function renderOverviewItemsFor(dayId){
   });
 }
 
+// ---------------- 打包清單（僅自己可見的個人物品清單） ----------------
+async function renderPackingSection(el){
+  el.innerHTML = `
+    <div class="card">
+      <h2>🎒 我的打包清單</h2>
+      <p class="subtitle" style="margin-bottom:10px;">只有你自己看得到，勾選代表已經帶了</p>
+      <div id="packProgress" class="pack-progress"></div>
+      <div id="packList"><div class="empty-state" style="padding:14px 0;">載入中…</div></div>
+      <form id="addPackForm" style="display:flex;gap:8px;margin-top:10px;">
+        <input type="text" id="packItemInput" placeholder="例如：護照、充電線、雨傘…" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required maxlength="40">
+        <button type="submit" class="btn btn-outline" style="flex-shrink:0;">新增</button>
+      </form>
+    </div>
+  `;
+
+  const cacheKey = tabCacheKey('packing');
+  let items = tabDataCache[cacheKey];
+  const collectionRef = db.collection('trips').doc(currentTrip.id).collection('packingItems');
+  if(!items){
+    try{
+      const snap = await collectionRef.where('userId','==', currentUser.uid).orderBy('createdAt','asc').get();
+      items = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    }catch(err){
+      items = [];
+    }
+    tabDataCache[cacheKey] = items;
+  }
+
+  function renderList(){
+    const listEl = document.getElementById('packList');
+    const progressEl = document.getElementById('packProgress');
+    if(!listEl) return;
+    const packedCount = items.filter(it=>it.packed).length;
+    progressEl.textContent = items.length===0 ? '' : `已打包 ${packedCount} / ${items.length} 項`;
+    if(items.length===0){
+      listEl.innerHTML = `<div class="empty-state" style="padding:14px 0;">還沒有加入任何物品，開始列你的打包清單吧</div>`;
+      return;
+    }
+    listEl.innerHTML = items.map(it=>`
+      <div class="pack-row ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}">
+        <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" ${it.packed?'checked':''}>
+        <span class="pack-item-name">${esc(it.name)}</span>
+        <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('[data-pack-toggle]').forEach(cb=>{
+      cb.onchange = async ()=>{
+        const id = cb.dataset.packToggle;
+        const item = items.find(x=>x.id===id);
+        if(!item) return;
+        item.packed = cb.checked;
+        renderList();
+        try{
+          await collectionRef.doc(id).update({packed: item.packed});
+        }catch(err){
+          item.packed = !item.packed;
+          renderList();
+          alert('更新失敗，請檢查網路連線：'+err.message);
+        }
+      };
+    });
+    listEl.querySelectorAll('[data-del-pack]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const id = btn.dataset.delPack;
+        try{
+          await collectionRef.doc(id).delete();
+          items = items.filter(x=>x.id!==id);
+          tabDataCache[cacheKey] = items;
+          renderList();
+        }catch(err){
+          alert('刪除失敗，請檢查網路連線：'+err.message);
+        }
+      };
+    });
+  }
+  renderList();
+
+  document.getElementById('addPackForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const input = document.getElementById('packItemInput');
+    const name = input.value.trim();
+    if(!name) return;
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try{
+      const newItem = {
+        name, packed:false, userId: currentUser.uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      const ref = await collectionRef.add(newItem);
+      items.push({id:ref.id, ...newItem, createdAt:{toDate:()=>new Date()}});
+      tabDataCache[cacheKey] = items;
+      input.value = '';
+      renderList();
+    }catch(err){
+      alert('新增失敗，請檢查網路連線：'+err.message);
+    }finally{
+      submitBtn.disabled = false;
+    }
+  };
+}
+
 // ---------------- 攻略／貼文（共同貼文牆） ----------------
 function formatPostTime(ts){
   if(!ts || typeof ts.toDate !== 'function') return '剛剛發布';
@@ -1881,6 +1990,7 @@ async function renderPostsTab(el){
     }
   }
   el.innerHTML = `
+    <div id="packingSection"></div>
     <div class="card">
       <h2>✏️ 發表新貼文</h2>
       <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
@@ -1902,6 +2012,8 @@ async function renderPostsTab(el){
       ${posts.length===0 ? `<div class="empty-state">還沒有人發文，來寫第一篇攻略吧</div>` : posts.map(postCardHTML).join('')}
     </div>
   `;
+
+  renderPackingSection(document.getElementById('packingSection'));
 
   let pendingPostImage = null;
   const postImageInput = document.getElementById('postImageInput');
