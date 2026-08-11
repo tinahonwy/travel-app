@@ -198,6 +198,11 @@
   .pack-check{width:20px;height:20px;accent-color:var(--matcha);cursor:pointer;flex-shrink:0;}
   .pack-item-name{flex:1;min-width:0;word-break:break-word;font-size:13.5px;}
   .pack-progress{font-size:12px;color:var(--muted);margin-bottom:10px;}
+  .pack-category-block{margin-bottom:16px;}
+  .pack-category-block:last-child{margin-bottom:0;}
+  .pack-category-title{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;font-weight:700;color:var(--matcha);background:#E8EFDD;padding:5px 10px;border-radius:6px;margin-bottom:2px;}
+  .pack-category-title .pack-category-count{font-weight:400;font-size:11.5px;color:var(--muted);}
+  .pack-category-select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);}
 
   @media (max-width:600px){
     .container{padding:20px 12px 60px;}
@@ -1784,24 +1789,54 @@ async function renderOverviewItemsFor(dayId){
   });
 }
 
-// ---------------- 打包清單（僅自己可見的個人物品清單） ----------------
+// ---------------- 打包清單（僅自己可見的個人物品清單，支援分類） ----------------
+const DEFAULT_PACK_CATEGORIES = [
+  '📄 出入境用品',
+  '🔌 電子用品',
+  '🧴 盥洗用品',
+  '👕 衣物',
+  '💊 藥品／醫療用品',
+  '🩸 生理用品',
+  '🎁 伴手禮／購物清單',
+  '💎 貴重物品',
+  '📦 其他'
+];
+const NEW_CATEGORY_VALUE = '__new_category__';
+
+function packCategorySelectOptionsHTML(categories, selected){
+  const opts = categories.map(c=>`<option value="${esc(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('');
+  return opts + `<option value="${NEW_CATEGORY_VALUE}">＋ 新增自訂類別…</option>`;
+}
+
 async function renderPackingSection(el){
   el.innerHTML = `
     <div class="card">
       <h2>🎒 我的打包清單</h2>
-      <p class="subtitle" style="margin-bottom:10px;">只有你自己看得到，勾選代表已經帶了</p>
+      <p class="subtitle" style="margin-bottom:10px;">只有你自己看得到，勾選代表已經帶了，可以自訂分類</p>
       <div id="packProgress" class="pack-progress"></div>
       <div id="packList"><div class="empty-state" style="padding:14px 0;">載入中…</div></div>
-      <form id="addPackForm" style="display:flex;gap:8px;margin-top:10px;">
-        <input type="text" id="packItemInput" placeholder="例如：護照、充電線、雨傘…" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required maxlength="40">
-        <button type="submit" class="btn btn-outline" style="flex-shrink:0;">新增</button>
+      <form id="addPackForm" style="margin-top:10px;">
+        <div class="field" style="margin-bottom:8px;">
+          <select id="packCategorySelect" class="pack-category-select"></select>
+        </div>
+        <div class="field hidden" id="packNewCategoryWrap" style="margin-bottom:8px;">
+          <input type="text" id="packNewCategoryInput" placeholder="輸入新的類別名稱，例如：登山用品" maxlength="20" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;">
+        </div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="packItemInput" placeholder="例如：護照、充電線、雨傘…" style="flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required maxlength="40">
+          <button type="submit" class="btn btn-outline" style="flex-shrink:0;">新增</button>
+        </div>
       </form>
     </div>
   `;
 
-  const cacheKey = tabCacheKey('packing');
-  let items = tabDataCache[cacheKey];
+  const itemsCacheKey = tabCacheKey('packing');
+  const catCacheKey = tabCacheKey('packingCategories');
+  let items = tabDataCache[itemsCacheKey];
+  let customCategories = tabDataCache[catCacheKey];
   const collectionRef = db.collection('trips').doc(currentTrip.id).collection('packingItems');
+  const catDocRef = db.collection('trips').doc(currentTrip.id).collection('packingCategories').doc(currentUser.uid);
+
   if(!items){
     try{
       const snap = await collectionRef.where('userId','==', currentUser.uid).orderBy('createdAt','asc').get();
@@ -1809,8 +1844,43 @@ async function renderPackingSection(el){
     }catch(err){
       items = [];
     }
-    tabDataCache[cacheKey] = items;
+    tabDataCache[itemsCacheKey] = items;
   }
+  if(!customCategories){
+    try{
+      const catSnap = await catDocRef.get();
+      customCategories = catSnap.exists ? (catSnap.data().names || []) : [];
+    }catch(err){
+      customCategories = [];
+    }
+    tabDataCache[catCacheKey] = customCategories;
+  }
+
+  // 若舊資料裡有用過、但還沒被存進自訂類別清單的分類名稱（例如舊版沒有分類欄位前建立的項目），也一併補進選項，避免漏掉
+  function allCategories(){
+    const known = new Set([...DEFAULT_PACK_CATEGORIES, ...customCategories]);
+    const extra = [];
+    items.forEach(it=>{
+      const c = it.category || '📦 其他';
+      if(!known.has(c)){ known.add(c); extra.push(c); }
+    });
+    return [...DEFAULT_PACK_CATEGORIES, ...customCategories, ...extra];
+  }
+
+  function populateCategorySelect(selectedValue){
+    const selectEl = document.getElementById('packCategorySelect');
+    if(!selectEl) return;
+    selectEl.innerHTML = packCategorySelectOptionsHTML(allCategories(), selectedValue);
+  }
+  populateCategorySelect(DEFAULT_PACK_CATEGORIES[0]);
+
+  const categorySelectEl = document.getElementById('packCategorySelect');
+  const newCategoryWrap = document.getElementById('packNewCategoryWrap');
+  const newCategoryInput = document.getElementById('packNewCategoryInput');
+  categorySelectEl.onchange = ()=>{
+    newCategoryWrap.classList.toggle('hidden', categorySelectEl.value !== NEW_CATEGORY_VALUE);
+    if(categorySelectEl.value === NEW_CATEGORY_VALUE) newCategoryInput.focus();
+  };
 
   function renderList(){
     const listEl = document.getElementById('packList');
@@ -1822,13 +1892,33 @@ async function renderPackingSection(el){
       listEl.innerHTML = `<div class="empty-state" style="padding:14px 0;">還沒有加入任何物品，開始列你的打包清單吧</div>`;
       return;
     }
-    listEl.innerHTML = items.map(it=>`
-      <div class="pack-row ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}">
-        <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" ${it.packed?'checked':''}>
-        <span class="pack-item-name">${esc(it.name)}</span>
-        <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
-      </div>
-    `).join('');
+    // 依分類分組，順序：預設分類 → 自訂分類 → 其他曾經用過的分類；分類內依加入時間排序
+    const order = allCategories();
+    const grouped = {};
+    items.forEach(it=>{
+      const c = it.category || '📦 其他';
+      grouped[c] = grouped[c] || [];
+      grouped[c].push(it);
+    });
+    listEl.innerHTML = order.filter(c=>grouped[c] && grouped[c].length>0).map(cat=>{
+      const catItems = grouped[cat];
+      const packedInCat = catItems.filter(it=>it.packed).length;
+      return `
+        <div class="pack-category-block" data-pack-cat="${esc(cat)}">
+          <div class="pack-category-title">
+            <span>${esc(cat)}</span>
+            <span class="pack-category-count">${packedInCat} / ${catItems.length}</span>
+          </div>
+          ${catItems.map(it=>`
+            <div class="pack-row ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}">
+              <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" ${it.packed?'checked':''}>
+              <span class="pack-item-name">${esc(it.name)}</span>
+              <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }).join('');
     listEl.querySelectorAll('[data-pack-toggle]').forEach(cb=>{
       cb.onchange = async ()=>{
         const id = cb.dataset.packToggle;
@@ -1851,7 +1941,7 @@ async function renderPackingSection(el){
         try{
           await collectionRef.doc(id).delete();
           items = items.filter(x=>x.id!==id);
-          tabDataCache[cacheKey] = items;
+          tabDataCache[itemsCacheKey] = items;
           renderList();
         }catch(err){
           alert('刪除失敗，請檢查網路連線：'+err.message);
@@ -1866,18 +1956,38 @@ async function renderPackingSection(el){
     const input = document.getElementById('packItemInput');
     const name = input.value.trim();
     if(!name) return;
+    let category = categorySelectEl.value;
     const submitBtn = e.target.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     try{
+      if(category === NEW_CATEGORY_VALUE){
+        const typed = newCategoryInput.value.trim();
+        if(!typed){ alert('請輸入新的類別名稱'); submitBtn.disabled = false; return; }
+        category = typed;
+        // 存成這個使用者往後可以重複選用的自訂類別，下次就不用再打一次字
+        if(!customCategories.includes(category) && !DEFAULT_PACK_CATEGORIES.includes(category)){
+          customCategories = [...customCategories, category];
+          tabDataCache[catCacheKey] = customCategories;
+          try{
+            await catDocRef.set({ names: firebase.firestore.FieldValue.arrayUnion(category) }, {merge:true});
+          }catch(err){
+            // 類別存檔失敗也不影響這次新增物品，只是下次可能要重打一次類別名稱
+          }
+        }
+      }
       const newItem = {
-        name, packed:false, userId: currentUser.uid,
+        name, category, packed:false, userId: currentUser.uid,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       const ref = await collectionRef.add(newItem);
       items.push({id:ref.id, ...newItem, createdAt:{toDate:()=>new Date()}});
-      tabDataCache[cacheKey] = items;
+      tabDataCache[itemsCacheKey] = items;
       input.value = '';
+      populateCategorySelect(category);
+      newCategoryInput.value = '';
+      newCategoryWrap.classList.add('hidden');
       renderList();
+      input.focus();
     }catch(err){
       alert('新增失敗，請檢查網路連線：'+err.message);
     }finally{
