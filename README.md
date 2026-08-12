@@ -1,2 +1,2 @@
 # travel-app
-四人旅遊規劃APP
+多人旅遊規劃APP
