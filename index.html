@@ -2157,7 +2157,8 @@ function postEditFormHTML(p){
   return `
     <div class="edit-item-form" data-post-row="${p.id}">
       <div class="field">
-        <textarea class="post-e-text" rows="4" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
+        <textarea class="post-e-text" rows="4" placeholder="也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
+        <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上</p>
       </div>
       <div class="field">
         <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（可多選）<input type="file" class="post-e-img-input" accept="image/*" multiple style="display:none"></label>
@@ -2195,7 +2196,8 @@ async function renderPostsTab(el){
       <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
       <form id="addPostForm">
         <div class="field">
-          <textarea id="postText" rows="4" placeholder="想跟大家分享什麼？" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);"></textarea>
+          <textarea id="postText" rows="4" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);"></textarea>
+          <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案</p>
         </div>
         <div class="field">
           <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填，可多選）<input type="file" id="postImageInput" accept="image/*" multiple style="display:none"></label>
@@ -2248,6 +2250,11 @@ async function renderPostsTab(el){
     pendingPostImages.splice(i,1);
     renderPendingImageThumbs(postImageListEl, pendingPostImages, removePendingPostImage);
   }
+  async function addPastedImageFile(file){
+    const dataUrl = await compressImageFile(file);
+    pendingPostImages.push(dataUrl);
+    renderPendingImageThumbs(postImageListEl, pendingPostImages, removePendingPostImage);
+  }
   postImageInput.onchange = async (e)=>{
     const files = [...e.target.files];
     postImageInput.value = '';
@@ -2257,6 +2264,17 @@ async function renderPostsTab(el){
     }
     renderPendingImageThumbs(postImageListEl, pendingPostImages, removePendingPostImage);
   };
+  // 截圖／複製的圖片可以直接在文字框按 Ctrl+V 貼上，不用先存成檔案
+  document.getElementById('postText').addEventListener('paste', async (e)=>{
+    const items = [...(e.clipboardData ? e.clipboardData.items : [])];
+    const imageItems = items.filter(it=>it.type && it.type.startsWith('image/'));
+    if(imageItems.length===0) return; // 貼的是文字，讓瀏覽器照正常方式處理
+    e.preventDefault();
+    for(const it of imageItems){
+      const file = it.getAsFile();
+      if(file) await addPastedImageFile(file);
+    }
+  });
 
   document.getElementById('addPostForm').onsubmit = async (e)=>{
     e.preventDefault();
@@ -2324,6 +2342,20 @@ async function renderPostsTab(el){
         }
         renderPendingImageThumbs(imgListEl, pendingImages, removeEditImage);
       };
+      // 截圖／複製的圖片可以直接在文字框按 Ctrl+V 貼上
+      formEl.querySelector('.post-e-text').addEventListener('paste', async (e)=>{
+        const items = [...(e.clipboardData ? e.clipboardData.items : [])];
+        const imageItems = items.filter(it=>it.type && it.type.startsWith('image/'));
+        if(imageItems.length===0) return;
+        e.preventDefault();
+        for(const it of imageItems){
+          const file = it.getAsFile();
+          if(!file) continue;
+          const dataUrl = await compressImageFile(file);
+          pendingImages.push(dataUrl);
+          renderPendingImageThumbs(imgListEl, pendingImages, removeEditImage);
+        }
+      });
       formEl.querySelector('.post-e-cancel').onclick = ()=>{ renderPostsTab(el); };
       formEl.querySelector('.post-e-save').onclick = async ()=>{
         const text = formEl.querySelector('.post-e-text').value.trim();
