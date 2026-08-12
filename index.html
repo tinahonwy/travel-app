@@ -165,6 +165,29 @@
   .visibility-badge.public{background:#E8EFDD;color:var(--matcha);}
   .visibility-badge.private{background:#F1EAE0;color:var(--muted);}
 
+  /* 貼文文字截斷 / 圖片牆 / 燈箱 */
+  .post-text{font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}
+  .post-text-wrap{position:relative;}
+  .post-text-short-inner{max-height:8.5em;overflow:hidden;position:relative;}
+  .post-text-short-inner::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2.2em;background:linear-gradient(to bottom, rgba(255,255,255,0), var(--paper-card));}
+  .post-text-short-inner.post-text-expanded::after{display:none;}
+  .post-text-short-inner.post-text-expanded{max-height:none;overflow:visible;}
+  .post-readmore-btn{background:none;border:none;color:var(--vermillion);font-size:12.5px;font-weight:600;padding:6px 0 0;cursor:pointer;font-family:var(--font-body);}
+  .post-images-grid{display:grid;gap:6px;margin-top:2px;}
+  .post-gallery-img{width:100%;object-fit:cover;border-radius:10px;cursor:zoom-in;display:block;background:var(--paper);}
+  .post-e-img-list{display:flex;gap:8px;flex-wrap:wrap;}
+  .post-e-img-thumb-wrap{position:relative;width:76px;height:76px;flex-shrink:0;}
+  .post-e-img-thumb{width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--border);display:block;}
+  .post-e-img-remove{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:2px solid var(--paper-card);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
+  .gallery-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:220;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;}
+  .gallery-stage{position:relative;max-width:100%;max-height:82vh;display:flex;align-items:center;justify-content:center;}
+  .gallery-stage img{max-width:100%;max-height:82vh;border-radius:10px;display:block;}
+  .gallery-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);color:#fff;border:none;border-radius:50%;width:38px;height:38px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .gallery-nav:active{transform:translateY(-50%) scale(.92);}
+  .gallery-prev{left:6px;} .gallery-next{right:6px;}
+  .gallery-counter{color:#fff;font-size:12.5px;margin-top:12px;font-family:var(--font-mono);opacity:.85;}
+  .gallery-close{position:absolute;top:18px;right:18px;background:rgba(0,0,0,.45);color:#fff;border:none;border-radius:50%;width:34px;height:34px;font-size:16px;cursor:pointer;}
+
   .empty-state{text-align:center;padding:36px 16px;color:var(--muted);font-size:13.5px;}
   .message{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
   .message.error{background:#FBEAE7;color:var(--danger);}
@@ -2066,12 +2089,41 @@ function linkifyText(text){
   result += esc(text.slice(lastIndex));
   return result;
 }
+const POST_TRUNCATE_LENGTH = 150;
+// 貼文文字：太長的話先摺疊起來，按「繼續閱讀」才展開全文
+function postTextHTML(text, hasImages){
+  if(!text) return '';
+  const marginStyle = hasImages ? 'margin-bottom:10px;' : '';
+  const isLong = text.length > POST_TRUNCATE_LENGTH || (text.match(/\n/g)||[]).length >= 6;
+  if(!isLong){
+    return `<div class="post-text" style="${marginStyle}">${linkifyText(text)}</div>`;
+  }
+  return `
+    <div class="post-text-wrap" style="${marginStyle}">
+      <div class="post-text-short-inner"><div class="post-text">${linkifyText(text)}</div></div>
+      <button type="button" class="post-readmore-btn" data-readmore>繼續閱讀 ▾</button>
+    </div>
+  `;
+}
+// 貼文圖片牆：支援多張圖片，點擊像 FB 一樣放大並可左右切換
+function postImagesHTML(images){
+  if(!images || images.length===0) return '';
+  const n = images.length;
+  const cols = n===1 ? 1 : (n===3 ? 3 : 2);
+  const imagesJSON = esc(JSON.stringify(images));
+  return `
+    <div class="post-images-grid" data-images="${imagesJSON}" style="grid-template-columns:repeat(${cols},1fr);">
+      ${images.map((src,i)=>`<img src="${src}" class="post-gallery-img" data-gallery-index="${i}" title="點擊放大" style="height:${n===1?'auto':'150px'};${n===1?'max-height:420px;':''}">`).join('')}
+    </div>
+  `;
+}
 function postCardHTML(p){
   const author = memberOf(p.authorUid);
   const authorName = p.authorName || (author ? author.displayName : '未知成員');
   const likes = p.likes || [];
   const likedByMe = currentUser && likes.includes(currentUser.uid);
   const commentCount = p.commentCount || 0;
+  const images = p.images || (p.image ? [p.image] : []);
   return `
     <div class="card" data-post-row="${p.id}">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -2081,8 +2133,8 @@ function postCardHTML(p){
           <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}${p.editedAt ? '（已編輯）' : ''}</div>
         </div>
       </div>
-      ${p.text ? `<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;${p.image?'margin-bottom:10px;':''}">${linkifyText(p.text)}</div>` : ''}
-      ${p.image ? `<img src="${p.image}" data-view-img title="點擊放大" style="max-width:100%;max-height:360px;border-radius:10px;cursor:zoom-in;display:block;">` : ''}
+      ${postTextHTML(p.text, images.length>0)}
+      ${postImagesHTML(images)}
       <div style="display:flex;align-items:center;gap:18px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
         <button type="button" class="post-like-btn" data-like-post="${p.id}" style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:13px;color:${likedByMe?'var(--vermillion)':'var(--muted)'};padding:0;">
           <span style="font-size:16px;">${likedByMe?'❤️':'🤍'}</span><span class="post-like-count">${likes.length>0?likes.length:''}</span>
@@ -2108,11 +2160,8 @@ function postEditFormHTML(p){
         <textarea class="post-e-text" rows="4" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
       </div>
       <div class="field">
-        <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 更換照片<input type="file" class="post-e-img-input" accept="image/*" style="display:none"></label>
-        <div class="post-e-img-preview-wrap" style="margin-top:10px;display:${p.image?'flex':'none'};align-items:center;gap:8px;">
-          <img class="post-e-img-preview" src="${p.image||''}" style="max-width:120px;max-height:120px;border-radius:8px;border:1px solid var(--border);object-fit:cover;">
-          <button type="button" class="btn-danger post-e-img-clear">移除照片</button>
-        </div>
+        <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（可多選）<input type="file" class="post-e-img-input" accept="image/*" multiple style="display:none"></label>
+        <div class="post-e-img-list" style="margin-top:10px;"></div>
       </div>
       <div style="display:flex;gap:8px">
         <button type="button" class="btn btn-accent post-e-save" style="flex:1">儲存</button>
@@ -2149,11 +2198,8 @@ async function renderPostsTab(el){
           <textarea id="postText" rows="4" placeholder="想跟大家分享什麼？" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);"></textarea>
         </div>
         <div class="field">
-          <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填）<input type="file" id="postImageInput" accept="image/*" style="display:none"></label>
-          <div id="postImagePreviewWrap" class="hidden" style="margin-top:10px;display:flex;align-items:center;gap:8px;">
-            <img id="postImagePreview" style="max-width:120px;max-height:120px;border-radius:8px;border:1px solid var(--border);object-fit:cover;">
-            <button type="button" class="btn-danger" id="postImageClearBtn">移除照片</button>
-          </div>
+          <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填，可多選）<input type="file" id="postImageInput" accept="image/*" multiple style="display:none"></label>
+          <div id="postImageList" class="post-e-img-list" style="margin-top:10px;"></div>
         </div>
         <button type="submit" class="btn btn-accent btn-block">發布</button>
       </form>
@@ -2165,41 +2211,57 @@ async function renderPostsTab(el){
 
   renderPackingSection(document.getElementById('packingSection'));
 
-  let pendingPostImage = null;
+  let pendingPostImages = [];
   const postImageInput = document.getElementById('postImageInput');
-  const postImagePreviewWrap = document.getElementById('postImagePreviewWrap');
-  const postImagePreview = document.getElementById('postImagePreview');
-  postImageInput.onchange = (e)=>{
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev)=>{
-      const img = new Image();
-      img.onload = ()=>{
-        const maxW = 900;
-        const scale = Math.min(1, maxW/img.width);
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width*scale;
-        canvas.height = img.height*scale;
-        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-        pendingPostImage = canvas.toDataURL('image/jpeg', 0.75);
-        postImagePreview.src = pendingPostImage;
-        postImagePreviewWrap.classList.remove('hidden');
+  const postImageListEl = document.getElementById('postImageList');
+  function renderPendingImageThumbs(listEl, images, onRemove){
+    listEl.innerHTML = images.map((src,i)=>`
+      <div class="post-e-img-thumb-wrap" data-thumb-i="${i}">
+        <img src="${src}" class="post-e-img-thumb">
+        <button type="button" class="post-e-img-remove" data-remove-i="${i}">✕</button>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('[data-remove-i]').forEach(btn=>{
+      btn.onclick = ()=>onRemove(Number(btn.dataset.removeI));
+    });
+  }
+  function compressImageFile(file){
+    return new Promise((resolve)=>{
+      const reader = new FileReader();
+      reader.onload = (ev)=>{
+        const img = new Image();
+        img.onload = ()=>{
+          const maxW = 900;
+          const scale = Math.min(1, maxW/img.width);
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width*scale;
+          canvas.height = img.height*scale;
+          canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.75));
+        };
+        img.src = ev.target.result;
       };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
-  };
-  document.getElementById('postImageClearBtn').onclick = ()=>{
-    pendingPostImage = null;
+      reader.readAsDataURL(file);
+    });
+  }
+  function removePendingPostImage(i){
+    pendingPostImages.splice(i,1);
+    renderPendingImageThumbs(postImageListEl, pendingPostImages, removePendingPostImage);
+  }
+  postImageInput.onchange = async (e)=>{
+    const files = [...e.target.files];
     postImageInput.value = '';
-    postImagePreviewWrap.classList.add('hidden');
+    for(const file of files){
+      const dataUrl = await compressImageFile(file);
+      pendingPostImages.push(dataUrl);
+    }
+    renderPendingImageThumbs(postImageListEl, pendingPostImages, removePendingPostImage);
   };
 
   document.getElementById('addPostForm').onsubmit = async (e)=>{
     e.preventDefault();
     const text = document.getElementById('postText').value.trim();
-    if(!text && !pendingPostImage){ alert('請輸入文字或加一張照片'); return; }
+    if(!text && pendingPostImages.length===0){ alert('請輸入文字或加至少一張照片'); return; }
     const submitBtn = e.target.querySelector('button[type="submit"]');
     submitBtn.disabled = true; submitBtn.textContent = '發布中…';
     try{
@@ -2211,7 +2273,7 @@ async function renderPostsTab(el){
         likes: [],
         commentCount: 0
       };
-      if(pendingPostImage) post.image = pendingPostImage;
+      if(pendingPostImages.length>0) post.images = pendingPostImages;
       await db.collection('trips').doc(currentTrip.id).collection('posts').add(post);
       clearTabCache('posts');
       renderPostsTab(el);
@@ -2243,55 +2305,41 @@ async function renderPostsTab(el){
       cardEl.outerHTML = postEditFormHTML(post);
       const formEl = document.querySelector(`.edit-item-form[data-post-row="${post.id}"]`);
 
-      let pendingImage = post.image || null;
-      let imageRemoved = false;
+      let pendingImages = [...(post.images || (post.image ? [post.image] : []))];
       const imgInput = formEl.querySelector('.post-e-img-input');
-      const imgPreviewWrap = formEl.querySelector('.post-e-img-preview-wrap');
-      const imgPreview = formEl.querySelector('.post-e-img-preview');
+      const imgListEl = formEl.querySelector('.post-e-img-list');
 
-      imgInput.onchange = (e)=>{
-        const file = e.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev)=>{
-          const img = new Image();
-          img.onload = ()=>{
-            const maxW = 900;
-            const scale = Math.min(1, maxW/img.width);
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width*scale;
-            canvas.height = img.height*scale;
-            canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-            pendingImage = canvas.toDataURL('image/jpeg', 0.75);
-            imageRemoved = false;
-            imgPreview.src = pendingImage;
-            imgPreviewWrap.style.display = 'flex';
-          };
-          img.src = ev.target.result;
-        };
-        reader.readAsDataURL(file);
-      };
-      formEl.querySelector('.post-e-img-clear').onclick = ()=>{
-        pendingImage = null;
-        imageRemoved = true;
+      function removeEditImage(i){
+        pendingImages.splice(i,1);
+        renderPendingImageThumbs(imgListEl, pendingImages, removeEditImage);
+      }
+      renderPendingImageThumbs(imgListEl, pendingImages, removeEditImage);
+
+      imgInput.onchange = async (e)=>{
+        const files = [...e.target.files];
         imgInput.value = '';
-        imgPreviewWrap.style.display = 'none';
+        for(const file of files){
+          const dataUrl = await compressImageFile(file);
+          pendingImages.push(dataUrl);
+        }
+        renderPendingImageThumbs(imgListEl, pendingImages, removeEditImage);
       };
       formEl.querySelector('.post-e-cancel').onclick = ()=>{ renderPostsTab(el); };
       formEl.querySelector('.post-e-save').onclick = async ()=>{
         const text = formEl.querySelector('.post-e-text').value.trim();
-        if(!text && !pendingImage){ alert('請輸入文字或加一張照片'); return; }
+        if(!text && pendingImages.length===0){ alert('請輸入文字或加至少一張照片'); return; }
         const saveBtn = formEl.querySelector('.post-e-save');
         saveBtn.disabled = true; saveBtn.textContent = '儲存中…';
         try{
           const updateData = {
             text,
-            editedAt: firebase.firestore.FieldValue.serverTimestamp()
+            editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            image: firebase.firestore.FieldValue.delete() // 舊版單張圖片欄位，統一改存 images 陣列
           };
-          if(pendingImage){
-            updateData.image = pendingImage;
-          } else if(imageRemoved){
-            updateData.image = firebase.firestore.FieldValue.delete();
+          if(pendingImages.length>0){
+            updateData.images = pendingImages;
+          } else {
+            updateData.images = firebase.firestore.FieldValue.delete();
           }
           await db.collection('trips').doc(currentTrip.id).collection('posts').doc(post.id).update(updateData);
           clearTabCache('posts');
@@ -3005,14 +3053,77 @@ async function renderMembersTab(el){
   }
 }
 
-document.addEventListener('click', (e)=>{
-  const img = e.target.closest('[data-view-img]');
-  if(!img) return;
+// 圖片燈箱：支援單張圖片，也支援像 FB 一樣可以左右切換的多張圖片相簿
+function openImageGallery(images, startIndex){
+  if(!images || images.length===0) return;
+  let idx = ((startIndex||0) % images.length + images.length) % images.length;
   const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<img src="${img.src}" style="max-width:100%;max-height:90vh;border-radius:12px;display:block;">`;
-  overlay.onclick = ()=>overlay.remove();
+  overlay.className = 'gallery-overlay';
+  function render(){
+    overlay.innerHTML = `
+      <button type="button" class="gallery-close" data-gallery-close>✕</button>
+      <div class="gallery-stage">
+        ${images.length>1 ? `<button type="button" class="gallery-nav gallery-prev">‹</button>` : ''}
+        <img src="${images[idx]}">
+        ${images.length>1 ? `<button type="button" class="gallery-nav gallery-next">›</button>` : ''}
+      </div>
+      ${images.length>1 ? `<div class="gallery-counter">${idx+1} / ${images.length}</div>` : ''}
+    `;
+    overlay.querySelector('.gallery-stage img').onclick = (e)=>e.stopPropagation();
+    const prevBtn = overlay.querySelector('.gallery-prev');
+    const nextBtn = overlay.querySelector('.gallery-next');
+    if(prevBtn) prevBtn.onclick = (e)=>{ e.stopPropagation(); idx = (idx-1+images.length)%images.length; render(); };
+    if(nextBtn) nextBtn.onclick = (e)=>{ e.stopPropagation(); idx = (idx+1)%images.length; render(); };
+    overlay.querySelector('[data-gallery-close]').onclick = (e)=>{ e.stopPropagation(); close(); };
+  }
+  function close(){
+    document.removeEventListener('keydown', keyHandler);
+    overlay.remove();
+  }
+  function keyHandler(e){
+    if(e.key==='ArrowLeft'){ idx=(idx-1+images.length)%images.length; render(); }
+    else if(e.key==='ArrowRight'){ idx=(idx+1)%images.length; render(); }
+    else if(e.key==='Escape'){ close(); }
+  }
+  render();
+  overlay.onclick = close;
+  document.addEventListener('keydown', keyHandler);
   document.body.appendChild(overlay);
+}
+
+document.addEventListener('click', (e)=>{
+  // 貼文「繼續閱讀」／「收合」切換
+  const readmoreBtn = e.target.closest('[data-readmore]');
+  if(readmoreBtn){
+    const wrap = readmoreBtn.closest('.post-text-wrap');
+    const inner = wrap.querySelector('.post-text-short-inner');
+    const expanded = inner.style.maxHeight === 'none';
+    if(expanded){
+      inner.style.maxHeight = '';
+      inner.classList.remove('post-text-expanded');
+      readmoreBtn.textContent = '繼續閱讀 ▾';
+    } else {
+      inner.style.maxHeight = 'none';
+      inner.classList.add('post-text-expanded');
+      readmoreBtn.textContent = '收合 ▴';
+    }
+    return;
+  }
+  // 貼文相簿：可左右切換的多圖燈箱
+  const galleryImg = e.target.closest('[data-gallery-index]');
+  if(galleryImg){
+    const container = galleryImg.closest('[data-images]');
+    if(container){
+      try{
+        const images = JSON.parse(container.dataset.images);
+        openImageGallery(images, Number(galleryImg.dataset.galleryIndex));
+      }catch(err){ /* ignore malformed image data */ }
+    }
+    return;
+  }
+  // 其他單張圖片（備忘錄圖片、個人頭貼等）
+  const img = e.target.closest('[data-view-img]');
+  if(img){ openImageGallery([img.src], 0); }
 });
 
 root.innerHTML = `<div class="empty-state">載入中…</div>`;
