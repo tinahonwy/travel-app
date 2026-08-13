@@ -827,20 +827,32 @@ async function openTrip(tripId){
 // 旅行公約（第一次進來要簽署同意，之後不再跳出；只有發起人能改內容，
 // 一改內容版本號就會＋1，所有人（包含發起人自己）都要重新簽署一次）
 // ------------------------------------------------------------
-const DEFAULT_AGREEMENT_TEXT = `🤝 一起出去玩・不吵架公約
+const DEFAULT_AGREEMENT_TEXT = `📜 行前宣誓
 
-1. 行程有調整先「討論」，不要單方面「決定」，大家講好才算數。
-2. 錢的事情當下講清楚，記帳到「金錢管理」，不要放在心裡累積。
-3. 有人想放空、有人想衝景點，互相尊重彼此的步調，沒有誰必須全程奉陪。
-4. 遲到、迷路、天氣爛都是旅行的日常，先深呼吸，別把情緒丟給隊友。
-5. 心裡不爽的話，當下好好講出來，別憋到回國才爆炸。
-6. 拍照可以多等幾分鐘，但也記得為其他人留一點時間。
-7. 萬一真的吵起來了，先各自冷靜一下，回來後還是要繼續當朋友。
+我 {{name}} 在此宣誓：
 
-按下「我同意」代表你答應要當一個好隊友 🫶`;
+1. 絕不表現不耐煩的態度
+2. 絕不對任何行程指手畫腳
+3. 絕不說「這個門票太貴又無聊」
+4. 絕不說「外面太貴，還不如在家吃」
+5. 該花錢就花錢，絕不說浪費錢
+6. 身上的錢要花光光，不要省
+7. 絕不碎碎念
+
+不管中途發生什麼事，我都會保持好心情，
+行程都是大家事先講好的，不會臨場抱怨別人的安排，
+如有違反，我直接請吃晚餐。
+
+宣誓完畢 🤙`;
 
 function agreementTextOf(trip){
   return (trip && trip.agreementText) ? trip.agreementText : DEFAULT_AGREEMENT_TEXT;
+}
+// 把公約內容裡的 {{name}} 換成「目前登入的人」自己的暱稱，
+// 這樣不管誰打開，看到的都是「我 XXX 在此宣誓」，不用手動填空
+function renderAgreementText(text){
+  const name = (currentProfile && (currentProfile.displayName || currentProfile.email)) || '你';
+  return (text||'').replace(/\{\{name\}\}/g, name);
 }
 function agreementVersionOf(trip){
   return (trip && trip.agreementVersion) ? trip.agreementVersion : 1;
@@ -875,7 +887,7 @@ function openAgreementModal({mustAgree, onClose}={}){
         ${mustAgree ? '' : '<button class="modal-close" id="closeAgreementModal">✕</button>'}
       </div>
       ${(rec && !isCurrent) ? `<p class="subtitle" style="margin:0 0 10px;color:var(--vermillion);">📢 內容已經更新過了，請重新看一次並簽署</p>` : ''}
-      <div style="white-space:pre-wrap;font-size:13.5px;line-height:1.8;color:var(--ink-soft);max-height:50vh;overflow-y:auto;padding:2px 2px 12px;border-bottom:1px dashed var(--border);margin-bottom:14px;">${esc(agreementTextOf(currentTrip))}</div>
+      <div style="white-space:pre-wrap;font-size:13.5px;line-height:1.8;color:var(--ink-soft);max-height:50vh;overflow-y:auto;padding:2px 2px 12px;border-bottom:1px dashed var(--border);margin-bottom:14px;">${esc(renderAgreementText(agreementTextOf(currentTrip)))}</div>
       ${!isCurrent
         ? `<button class="btn btn-accent btn-block" id="agreeBtn">我同意，開始愉快的旅程！</button>`
         : `<p class="subtitle" style="margin:0;">你已在 ${esc(formatSignedTime(rec.signedAt))} 簽署過了</p>`
@@ -941,6 +953,7 @@ function openEditAgreementModal(refreshEl){
       <p class="subtitle" style="margin-bottom:10px;color:var(--vermillion);">⚠️ 儲存後，這份公約的版本號會＋1，所有團員（包含你自己）都要重新簽署一次才會消失提醒</p>
       <div class="field">
         <textarea id="agreementTextInput" rows="10" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13.5px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(agreementTextOf(currentTrip))}</textarea>
+        <p class="subtitle" style="margin:6px 0 0;font-size:12px;">💡 打 <code>{{name}}</code> 的地方，每個人打開時會自動換成自己的暱稱，例如「我 {{name}} 在此宣誓」</p>
       </div>
       <button class="btn btn-accent btn-block" id="saveAgreementBtn">儲存並要求大家重新簽署</button>
     </div>
