@@ -492,8 +492,18 @@ function readPrivateFields(scopeEl, prefix){
 }
 function itemPrivateTagHTML(item){
   if(item.visibility !== 'private') return '';
-  const others = (item.visibleTo||[]).map(uid=>nameOf(uid));
-  const who = others.length ? `你、${others.join('、')}` : '只有你';
+  // 修正重點：以前這裡把「你」寫死等於「建立者本人」，導致別人（例如你朋友）
+  // 用自己的帳號建立這筆私人行程時，你登入後看到的還是「你、對方名字」，
+  // 完全沒有依照『目前登入的是誰』重新判斷。
+  // 修法：可以看到這筆的人＝建立者(authorUid) + visibleTo 名單，
+  // 對每一個 uid 都用 isMe() 動態判斷是不是「你」，而不是假設建立者=你。
+  const authorUid = item.authorUid;
+  const visibleTo = item.visibleTo || [];
+  const allUids = [...new Set([authorUid, ...visibleTo].filter(Boolean))];
+  const names = allUids.map(uid => isMe(uid) ? '你' : nameOf(uid));
+  // 把「你」排到最前面，讀起來比較自然
+  names.sort((a,b)=> (a==='你' ? -1 : 0) - (b==='你' ? -1 : 0));
+  const who = names.length ? names.join('、') : '只有你';
   return `<div class="item-private-tag" title="${esc(who)}">🔒 私人（${esc(who)}看得到）</div>`;
 }
 // ------------------------------------------------------------
