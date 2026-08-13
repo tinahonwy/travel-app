@@ -10,10 +10,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=Noto+Sans+TC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --paper:#F7F3EA; --paper-card:#FFFFFF;
@@ -244,6 +243,9 @@
 </div>
 <div id="root"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
 <script>
 /* ============================================================
    把這裡換成你自己在 Firebase Console 拿到的 firebaseConfig
@@ -842,6 +844,12 @@ const DEFAULT_AGREEMENT_TEXT = `🤝 一起出去玩・不吵架公約
 function agreementTextOf(trip){
   return (trip && trip.agreementText) ? trip.agreementText : DEFAULT_AGREEMENT_TEXT;
 }
+// 把公約內容裡的 {{name}} 換成「目前登入的人」自己的暱稱，
+// 這樣不管誰打開，看到的都是「我 XXX 在此宣誓」，不用手動填空
+function renderAgreementText(text){
+  const name = (currentProfile && (currentProfile.displayName || currentProfile.email)) || '你';
+  return (text||'').replace(/\{\{name\}\}/g, name);
+}
 function agreementVersionOf(trip){
   return (trip && trip.agreementVersion) ? trip.agreementVersion : 1;
 }
@@ -875,7 +883,7 @@ function openAgreementModal({mustAgree, onClose}={}){
         ${mustAgree ? '' : '<button class="modal-close" id="closeAgreementModal">✕</button>'}
       </div>
       ${(rec && !isCurrent) ? `<p class="subtitle" style="margin:0 0 10px;color:var(--vermillion);">📢 內容已經更新過了，請重新看一次並簽署</p>` : ''}
-      <div style="white-space:pre-wrap;font-size:13.5px;line-height:1.8;color:var(--ink-soft);max-height:50vh;overflow-y:auto;padding:2px 2px 12px;border-bottom:1px dashed var(--border);margin-bottom:14px;">${esc(agreementTextOf(currentTrip))}</div>
+      <div style="white-space:pre-wrap;font-size:13.5px;line-height:1.8;color:var(--ink-soft);max-height:50vh;overflow-y:auto;padding:2px 2px 12px;border-bottom:1px dashed var(--border);margin-bottom:14px;">${esc(renderAgreementText(agreementTextOf(currentTrip)))}</div>
       ${!isCurrent
         ? `<button class="btn btn-accent btn-block" id="agreeBtn">我同意，開始愉快的旅程！</button>`
         : `<p class="subtitle" style="margin:0;">你已在 ${esc(formatSignedTime(rec.signedAt))} 簽署過了</p>`
@@ -941,6 +949,7 @@ function openEditAgreementModal(refreshEl){
       <p class="subtitle" style="margin-bottom:10px;color:var(--vermillion);">⚠️ 儲存後，這份公約的版本號會＋1，所有團員（包含你自己）都要重新簽署一次才會消失提醒</p>
       <div class="field">
         <textarea id="agreementTextInput" rows="10" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13.5px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(agreementTextOf(currentTrip))}</textarea>
+        <p class="subtitle" style="margin:6px 0 0;font-size:12px;">💡 打 <code>{{name}}</code> 的地方，每個人打開時會自動換成自己的暱稱，例如「我 {{name}} 在此宣誓」</p>
       </div>
       <button class="btn btn-accent btn-block" id="saveAgreementBtn">儲存並要求大家重新簽署</button>
     </div>
