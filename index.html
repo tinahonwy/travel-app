@@ -3078,6 +3078,7 @@ async function renderPersonalTab(el){
 
     <div class="card">
       <h2>其他團員公開的記帳</h2>
+      <p class="subtitle" id="othersTotalSubtitle" style="margin-bottom:14px;"></p>
       <div id="othersRecordList"><div class="empty-state">載入中…</div></div>
     </div>
   `;
@@ -3134,9 +3135,16 @@ async function renderPersonalTab(el){
   });
 
   const othersEl = document.getElementById('othersRecordList');
+  const myTotal = myRecords.reduce((s,r)=>s+toTWD(r.amount, r.currency, r.exchangeRate),0);
+  const othersTotal = othersData.reduce((sum,{records})=> sum + records.reduce((s,r)=>s+toTWD(r.amount, r.currency, r.exchangeRate),0), 0);
+  const othersTotalSubtitleEl = document.getElementById('othersTotalSubtitle');
+  othersTotalSubtitleEl.textContent = othersData.length===0
+    ? ''
+    : `這些公開記帳共 NT$${fmt(othersTotal)}　·　加上你自己的記帳，全團看得到的總支出 NT$${fmt(myTotal+othersTotal)}`;
   let html = '';
   for(const {member, records} of othersData){
-    html += `<h3 style="font-size:13.5px;margin-top:14px;display:flex;align-items:center;">${avatarChipHTML(member,18)}${esc(member.displayName)}</h3>`;
+    const memberTotal = records.reduce((s,r)=>s+toTWD(r.amount, r.currency, r.exchangeRate),0);
+    html += `<h3 style="font-size:13.5px;margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="display:flex;align-items:center;min-width:0;">${avatarChipHTML(member,18)}${esc(member.displayName)}</span><span class="amount-neutral" style="font-family:var(--font-mono);font-size:12px;flex-shrink:0;">NT$${fmt(memberTotal)}</span></h3>`;
     html += records.map(r=>`
       <div class="record-row">
         <div><div>${esc(r.title)}</div><div class="record-meta">${r.date}</div></div>
