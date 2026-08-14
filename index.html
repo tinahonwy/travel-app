@@ -986,13 +986,16 @@ async function renderTripDetailView(){
   root.innerHTML = `
     <div class="container has-tabbar">
       <button id="backBtn" class="btn btn-outline" style="margin-bottom:16px">← 回到我的旅行</button>
-      <div class="card-row" style="align-items:flex-start;margin-bottom:6px;">
-        <div>
-          <span class="eyebrow">${currentTrip.startDate}（週${WEEKDAYS[new Date(currentTrip.startDate+'T00:00:00').getDay()]}） → ${currentTrip.endDate}（週${WEEKDAYS[new Date(currentTrip.endDate+'T00:00:00').getDay()]}）</span>
-          <h1 style="margin-bottom:0">${esc(currentTrip.name)}</h1>
-        </div>
-        <button id="editTripBtn" class="item-btn item-btn-edit" style="flex-shrink:0;margin-top:2px;">編輯</button>
+         <div class="card-row" style="align-items:flex-start;margin-bottom:6px;">
+      <div>
+        <span class="eyebrow">${currentTrip.startDate}（週${WEEKDAYS[new Date(currentTrip.startDate+'T00:00:00').getDay()]}） → ${currentTrip.endDate}（週${WEEKDAYS[new Date(currentTrip.endDate+'T00:00:00').getDay()]}）</span>
+        <h1 style="margin-bottom:0">${esc(currentTrip.name)}</h1>
       </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px;">
+        <button id="dupTripBtn" class="item-btn item-btn-edit">複製</button>
+        <button id="editTripBtn" class="item-btn item-btn-edit">編輯</button>
+      </div>
+    </div>
       <div class="trip-code">
         行程代碼：<strong>${currentTrip.id}</strong>
         <button id="copyCodeBtn" class="btn-danger" style="color:var(--ink-soft)">複製</button>
@@ -1009,6 +1012,7 @@ async function renderTripDetailView(){
   `;
   document.getElementById('backBtn').onclick = ()=>{ currentTrip=null; renderTripsView(); };
   document.getElementById('editTripBtn').onclick = ()=>openEditTripModal();
+  document.getElementById('dupTripBtn').onclick = ()=>openDuplicateTripModal();
   document.getElementById('copyCodeBtn').onclick = ()=>{
     navigator.clipboard.writeText(currentTrip.id);
     const b = document.getElementById('copyCodeBtn');
@@ -1075,7 +1079,116 @@ function openEditTripModal(){
     }
   };
 }
+// ---------------- 複製行程 ----------------
+function openDuplicateTripModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>複製這個行程</h3>
+        <button class="modal-close" id="closeDupModal">✕</button>
+      </div>
+      <p class="subtitle" style="margin-bottom:14px;">會複製行程規劃（天數、時間、備註、連結、備忘錄），私人行程會統一變成共同行程。金錢紀錄、貼文、打包清單、團員名單不會被複製，你會是新行程唯一的成員兼發起人。</p>
+      <div id="dupMsgBox"></div>
+      <div class="field">
+        <label>新行程名稱</label>
+        <input type="text" id="dupName" value="${esc(currentTrip.name)}（複製）" maxlength="40">
+      </div>
+      <div class="field-row">
+        <div class="field"><label>新出發日</label><div class="date-wrap"><input type="date" id="dupStart" required></div></div>
+        <div class="field"><label>新回程日</label><div class="date-wrap"><input type="date" id="dupEnd" required></div></div>
+      </div>
+      <button class="btn btn-accent btn-block" id="dupConfirmBtn">複製行程</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('closeDupModal').onclick = ()=>overlay.remove();
+  overlay.onclick = (ev)=>{ if(ev.target===overlay) overlay.remove(); };
 
+  const origDays = Math.round((new Date(currentTrip.endDate) - new Date(currentTrip.startDate)) / 86400000);
+  document.getElementById('dupStart').value = currentTrip.startDate;
+  document.getElementById('dupEnd').value = addDaysToDateStr(currentTrip.startDate, origDays);
+
+  document.getElementById('dupStart').onchange = (e)=>{
+    document.getElementById('dupEnd').value = addDaysToDateStr(e.target.value, origDays);
+  };
+
+  document.getElementById('dupConfirmBtn').onclick = async ()=>{
+    const btn = document.getElementById('dupConfirmBtn');
+    const name = document.getElementById('dupName').value.trim();
+    const newStart = document.getElementById('dupStart').value;
+    const newEnd = document.getElementById('dupEnd').value;
+    if(!name){ showMsg('dupMsgBox', '請輸入行程名稱'); return; }
+    if(!newStart || !newEnd){ showMsg('dupMsgBox', '請選擇出發日跟回程日'); return; }
+    if(newStart > newEnd){ showMsg('dupMsgBox', '出發日不能晚於回程日'); return; }
+    btn.disabled = true; btn.textContent = '複製中…';
+    try{
+      const newTripId = await duplicateTrip(currentTrip.id, { name, newStart });
+      overlay.remove();
+      await openTrip(newTripId);
+    }catch(err){
+      showMsg('dupMsgBox', '複製失敗：'+err.message);
+      btn.disabled = false; btn.textContent = '複製行程';
+    }
+  };
+}
+
+async function duplicateTrip(sourceTripId, {name, newStart}){
+  const sourceRef = db.collection('trips').doc(sourceTripId);
+  const sourceSnap = await sourceRef.get();
+  if(!sourceSnap.exists) throw new Error('找不到來源行程');
+  const source = sourceSnap.data();
+
+  const newTripData = {
+    name,
+    startDate: newStart,
+    endDate: addDaysToDateStr(newStart, Math.round((new Date(source.endDate) - new Date(source.startDate)) / 86400000)),
+    ownerId: currentUser.uid,
+    members: [currentUser.uid],
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if(source.destinationCity){
+    newTripData.destinationCity = source.destinationCity;
+    newTripData.destinationLat = source.destinationLat;
+    newTripData.destinationLon = source.destinationLon;
+  }
+  const newTripRef = await db.collection('trips').add(newTripData);
+
+  const daysSnap = await sourceRef.collection('days').orderBy('date').get();
+  const batch = db.batch();
+
+  for(const dayDoc of daysSnap.docs){
+    const day = dayDoc.data();
+    const offset = Math.round((new Date(day.date) - new Date(source.startDate)) / 86400000);
+    const newDayRef = newTripRef.collection('days').doc();
+    batch.set(newDayRef, {
+      date: addDaysToDateStr(newStart, offset),
+      title: day.title
+    });
+
+    const itemsSnap = await sourceRef.collection('days').doc(dayDoc.id).collection('items').get();
+    itemsSnap.docs.forEach(itemDoc=>{
+      const it = itemDoc.data();
+      const newItemRef = newDayRef.collection('items').doc();
+      batch.set(newItemRef, {
+        time: it.time || '',
+        endTime: it.endTime || '',
+        title: it.title || '',
+        note: it.note || '',
+        link: it.link || '',
+        memos: it.memos || [],
+        links: it.links || [],
+        visibility: 'shared',
+        visibleTo: [],
+        authorUid: currentUser.uid
+      });
+    });
+  }
+
+  await batch.commit();
+  return newTripRef.id;
+}
 async function renderTabContent(){
   const el = document.getElementById('tabContent');
   el.innerHTML = `<div class="empty-state">載入中…</div>`;
