@@ -280,6 +280,7 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
+auth.languageCode = 'zh-TW';
 const db = firebase.firestore();
 
 // ------------------------------------------------------------
@@ -715,9 +716,88 @@ function friendlyAuthError(err){
     'auth/user-not-found':'找不到這個帳號',
     'auth/wrong-password':'密碼錯誤',
     'auth/invalid-credential':'email 或密碼錯誤',
-    'auth/too-many-requests':'嘗試太多次了，請稍後再試'
+    'auth/too-many-requests':'嘗試太多次了，請稍後再試',
+    'auth/network-request-failed':'網路連線失敗，請檢查網路後再試',
+    'auth/expired-action-code':'這個驗證連結已過期，請重新寄送',
+    'auth/invalid-action-code':'這個驗證連結無效或已使用，請重新寄送'
   };
   return map[err.code] || err.message;
+}
+
+// ==============================================================
+// Email 驗證畫面
+// ============================================================== 
+function renderEmailVerificationView(user){
+  const email = (user && user.email) ? user.email : '';
+  root.innerHTML = `
+    <div class="auth-screen">
+      <div class="auth-card">
+        <h1>📧 驗證你的 Email</h1>
+        <p class="subtitle" style="line-height:1.7;">
+          認證信已寄到<br><strong>${esc(email)}</strong><br>
+          請到信箱點擊驗證連結，完成後再回到這裡。
+        </p>
+        <div id="verifyMsgBox"></div>
+        <button type="button" class="btn btn-accent btn-block" id="checkVerifiedBtn">我已完成驗證</button>
+        <button type="button" class="btn btn-outline btn-block" id="resendVerificationBtn" style="margin-top:8px;">重新寄送認證信</button>
+        <button type="button" class="btn btn-outline btn-block" id="verifyLogoutBtn" style="margin-top:8px;">登出</button>
+        <p class="subtitle" style="margin:12px 0 0;font-size:12px;line-height:1.6;">
+          沒收到信？請先檢查垃圾郵件匣，或按「重新寄送認證信」。
+        </p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('checkVerifiedBtn').onclick = async ()=>{
+    const btn = document.getElementById('checkVerifiedBtn');
+    btn.disabled = true;
+    btn.textContent = '確認中…';
+    try{
+      if(!auth.currentUser){
+        await auth.signOut();
+        return;
+      }
+      await auth.currentUser.reload();
+      if(auth.currentUser.emailVerified){
+        // 強制更新 ID token，讓 Firestore Rules 立即取得 email_verified=true。
+        await auth.currentUser.getIdToken(true);
+        showMsg('verifyMsgBox', 'Email 驗證完成！正在進入 App…', 'success');
+        setTimeout(()=>location.reload(), 500);
+      }else{
+        showMsg('verifyMsgBox', '目前還沒收到驗證完成狀態，請先到信箱點擊驗證連結。');
+        btn.disabled = false;
+        btn.textContent = '我已完成驗證';
+      }
+    }catch(err){
+      showMsg('verifyMsgBox', friendlyAuthError(err));
+      btn.disabled = false;
+      btn.textContent = '我已完成驗證';
+    }
+  };
+
+  document.getElementById('resendVerificationBtn').onclick = async ()=>{
+    const btn = document.getElementById('resendVerificationBtn');
+    btn.disabled = true;
+    btn.textContent = '寄送中…';
+    try{
+      if(!auth.currentUser) throw new Error('登入狀態已失效，請重新登入');
+      await auth.currentUser.sendEmailVerification();
+      showMsg('verifyMsgBox', '認證信已重新寄出，請檢查信箱。', 'success');
+      btn.textContent = '已寄出';
+      setTimeout(()=>{
+        if(document.body.contains(btn)){
+          btn.disabled = false;
+          btn.textContent = '重新寄送認證信';
+        }
+      }, 30000);
+    }catch(err){
+      showMsg('verifyMsgBox', friendlyAuthError(err));
+      btn.disabled = false;
+      btn.textContent = '重新寄送認證信';
+    }
+  };
+
+  document.getElementById('verifyLogoutBtn').onclick = ()=>auth.signOut();
 }
 
 // ==============================================================
@@ -725,6 +805,16 @@ function friendlyAuthError(err){
 // ==============================================================
 auth.onAuthStateChanged(async (user)=>{
   currentUser = user;
+
+  // Email/Password 帳號必須先完成 Email 驗證才能進入 App。
+  if(user && !user.emailVerified){
+    topBar.classList.add('hidden');
+    currentProfile = null;
+    currentTrip = null;
+    renderEmailVerificationView(user);
+    return;
+  }
+
   if(user){
     topBar.classList.remove('hidden');
     try{
@@ -793,6 +883,11 @@ function renderAuthView(){
             <input type="password" id="passwordConfirm" placeholder="再輸入一次密碼" minlength="6" required>
           </div>` : ''}
           <button type="submit" class="btn btn-accent btn-block">${authMode==='login' ? '登入' : '註冊'}</button>
+          ${authMode==='login' ? `
+            <p class="auth-toggle" style="margin:10px 0 0;text-align:right;">
+              <a id="forgotPassword">忘記密碼？</a>
+            </p>
+          ` : ''}
         </form>
         <p class="auth-toggle">
           ${authMode==='login'
@@ -806,6 +901,36 @@ function renderAuthView(){
     authMode = authMode==='login' ? 'register' : 'login';
     renderAuthView();
   };
+
+  const forgotPasswordEl = document.getElementById('forgotPassword');
+  if(forgotPasswordEl){
+    forgotPasswordEl.onclick = async ()=>{
+      const emailEl = document.getElementById('email');
+      const email = emailEl.value.trim();
+      if(!email){
+        showMsg('authMsgBox', '請先輸入你的 Email，再按「忘記密碼」。');
+        emailEl.focus();
+        return;
+      }
+      forgotPasswordEl.style.pointerEvents = 'none';
+      forgotPasswordEl.style.opacity = '0.55';
+      try{
+        await auth.sendPasswordResetEmail(email);
+        showMsg('authMsgBox', '如果這個 Email 有註冊帳號，重設密碼信會寄到你的信箱，請檢查收件匣與垃圾郵件匣。', 'success');
+      }catch(err){
+        // 避免藉由忘記密碼功能確認某個 Email 是否已註冊。
+        if(err && err.code === 'auth/user-not-found'){
+          showMsg('authMsgBox', '如果這個 Email 有註冊帳號，重設密碼信會寄到你的信箱，請檢查收件匣與垃圾郵件匣。', 'success');
+        }else{
+          showMsg('authMsgBox', friendlyAuthError(err));
+        }
+      }finally{
+        forgotPasswordEl.style.pointerEvents = '';
+        forgotPasswordEl.style.opacity = '';
+      }
+    };
+  }
+
   document.getElementById('authForm').onsubmit = async (e)=>{
     e.preventDefault();
     const email = document.getElementById('email').value.trim();
@@ -825,6 +950,18 @@ function renderAuthView(){
           email, displayName: displayName || email.split('@')[0],
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        let verificationMailError = null;
+        try{
+          await cred.user.sendEmailVerification();
+        }catch(mailErr){
+          verificationMailError = mailErr;
+        }
+        renderEmailVerificationView(cred.user);
+        if(verificationMailError){
+          showMsg('verifyMsgBox', '帳號已建立，但認證信暫時寄送失敗：' + friendlyAuthError(verificationMailError) + '。你可以按「重新寄送認證信」再試一次。');
+        }else{
+          showMsg('verifyMsgBox', '帳號建立成功！認證信已寄出，請到信箱完成驗證。', 'success');
+        }
       } else {
         await auth.signInWithEmailAndPassword(email, password);
       }
