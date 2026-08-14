@@ -178,6 +178,14 @@
   .post-e-img-thumb-wrap{position:relative;width:76px;height:76px;flex-shrink:0;}
   .post-e-img-thumb{width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--border);display:block;}
   .post-e-img-remove{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:2px solid var(--paper-card);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
+  .post-e-img-remove{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:2px solid var(--paper-card);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
+.format-toolbar{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+.format-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--paper-card);font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink-soft);}
+.format-btn:active{transform:scale(.95);}
+.format-btn-bold{font-family:var(--font-serif,inherit);}
+.format-btn-highlight{background:#FFF3B0;color:#7A5C00;border-color:#F0DE80;}
+.format-btn-warn{background:var(--vermillion-soft);color:var(--vermillion);border-color:var(--vermillion);}
+.post-text mark{background:#FFF3B0;color:inherit;padding:0 3px;border-radius:3px;}
   .gallery-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:220;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;}
   .gallery-stage{position:relative;max-width:100%;max-height:82vh;display:flex;align-items:center;justify-content:center;}
   .gallery-stage img{max-width:100%;max-height:82vh;border-radius:10px;display:block;}
@@ -2346,28 +2354,61 @@ function formatPostTime(ts){
   return d.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
 }
 // 把純文字裡的網址自動轉成可以點擊的連結（先安全跳脫文字，再插入連結標籤，避免 XSS）
+// 把純文字裡的網址轉成可點擊連結，並支援簡單的畫重點標記：
+// **文字** → 粗體、==文字== → 螢光筆重點、!!文字!! → 紅字強調
 function linkifyText(text){
   if(!text) return '';
-  const urlRegex = /(https?:\/\/[^\s<>"']+)/gi;
+  const tokenRegex = /(https?:\/\/[^\s<>"']+)|\*\*([^\n*]+?)\*\*|==([^\n=]+?)==|!!([^\n!]+?)!!/g;
   const trailingPunct = /[.,;:!?)\]}]+$/;
   let result = '';
   let lastIndex = 0;
   let match;
-  while((match = urlRegex.exec(text)) !== null){
-    let url = match[0];
-    let trailing = '';
-    const trailMatch = url.match(trailingPunct);
-    if(trailMatch){
-      trailing = trailMatch[0];
-      url = url.slice(0, url.length - trailing.length);
-    }
+  while((match = tokenRegex.exec(text)) !== null){
     result += esc(text.slice(lastIndex, match.index));
-    result += `<a href="${esc(url)}" target="_blank" rel="noopener">${linkIconHTML(url)}${esc(url)}</a>`;
-    result += esc(trailing);
+    if(match[1]){
+      let url = match[1];
+      let trailing = '';
+      const trailMatch = url.match(trailingPunct);
+      if(trailMatch){
+        trailing = trailMatch[0];
+        url = url.slice(0, url.length - trailing.length);
+      }
+      result += `<a href="${esc(url)}" target="_blank" rel="noopener">${linkIconHTML(url)}${esc(url)}</a>`;
+      result += esc(trailing);
+    } else if(match[2] !== undefined){
+      result += `<strong>${esc(match[2])}</strong>`;
+    } else if(match[3] !== undefined){
+      result += `<mark>${esc(match[3])}</mark>`;
+    } else if(match[4] !== undefined){
+      result += `<strong style="color:var(--vermillion);">${esc(match[4])}</strong>`;
+    }
     lastIndex = match.index + match[0].length;
   }
   result += esc(text.slice(lastIndex));
   return result;
+}
+
+// 工具列按鈕：把選取的文字包上標記符號（例如 **文字**），沒選取的話就插入一組空標記讓使用者接著打字
+function wrapTextareaSelection(textarea, before, after){
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const value = textarea.value;
+  const selected = value.slice(start, end);
+  textarea.value = value.slice(0, start) + before + selected + after + value.slice(end);
+  const cursorStart = start + before.length;
+  const cursorEnd = cursorStart + selected.length;
+  textarea.focus();
+  textarea.setSelectionRange(cursorStart, cursorEnd);
+}
+function bindFormatToolbar(scopeEl, textarea){
+  scopeEl.querySelectorAll('[data-fmt]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const type = btn.dataset.fmt;
+      const marks = { bold:['**','**'], highlight:['==','=='], warn:['!!','!!'] };
+      const [before, after] = marks[type] || ['',''];
+      wrapTextareaSelection(textarea, before, after);
+    };
+  });
 }
 const POST_TRUNCATE_LENGTH = 150;
 // 貼文文字：太長的話先摺疊起來，按「繼續閱讀」才展開全文
@@ -2436,10 +2477,15 @@ function postCardHTML(p){
 function postEditFormHTML(p){
   return `
     <div class="edit-item-form" data-post-row="${p.id}">
-      <div class="field">
-        <textarea class="post-e-text" rows="8" placeholder="也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
+        <div class="field">
+        <div class="format-toolbar">
+            <button type="button" class="format-btn format-btn-bold" data-fmt="bold" title="粗體">B 粗體</button>
+            <button type="button" class="format-btn format-btn-highlight" data-fmt="highlight" title="螢光筆重點">🖍️ 螢光筆</button>
+            <button type="button" class="format-btn format-btn-warn" data-fmt="warn" title="紅字強調">🔴 紅字</button>
+        </div>
+        <textarea class="post-e-text" rows="8" placeholder="也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;">${esc(p.text||'')}</textarea>
         <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上</p>
-      </div>
+        </div>
       <div class="field">
         <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（可多選）<input type="file" class="post-e-img-input" accept="image/*" multiple style="display:none"></label>
         <div class="post-e-img-list" style="margin-top:10px;"></div>
@@ -2476,8 +2522,13 @@ async function renderPostsTab(el){
       <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
       <form id="addPostForm">
         <div class="field">
-          <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;"></textarea>
-          <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案</p>
+        <div class="format-toolbar">
+            <button type="button" class="format-btn format-btn-bold" data-fmt="bold" title="粗體">B 粗體</button>
+            <button type="button" class="format-btn format-btn-highlight" data-fmt="highlight" title="螢光筆重點">🖍️ 螢光筆</button>
+            <button type="button" class="format-btn format-btn-warn" data-fmt="warn" title="紅字強調">🔴 紅字</button>
+        </div>
+        <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;"></textarea>
+        <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案。選取文字後按上面的按鈕可以畫重點</p>
         </div>
         <div class="field">
           <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填，可多選）<input type="file" id="postImageInput" accept="image/*" multiple style="display:none"></label>
@@ -2491,7 +2542,8 @@ async function renderPostsTab(el){
     </div>
   `;
 
-  renderPackingSection(document.getElementById('packingSection'));
+    renderPackingSection(document.getElementById('packingSection'));
+    bindFormatToolbar(document.getElementById('addPostForm'), document.getElementById('postText'));
 
   let pendingPostImages = [];
   const postImageInput = document.getElementById('postImageInput');
@@ -2613,6 +2665,7 @@ async function renderPostsTab(el){
       }
       renderPendingImageThumbs(imgListEl, pendingImages, removeEditImage);
 
+      bindFormatToolbar(formEl, formEl.querySelector('.post-e-text'));
       imgInput.onchange = async (e)=>{
         const files = [...e.target.files];
         imgInput.value = '';
