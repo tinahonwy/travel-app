@@ -708,6 +708,28 @@ function showMsg(boxId, text, type){
   box.prepend(el);
   setTimeout(()=>el.remove(), 4000);
 }
+function showMailNotice(boxId, intro){
+  const box = document.getElementById(boxId);
+  if(!box) return;
+  const el = document.createElement('div');
+  el.className = 'message success';
+  el.style.textAlign = 'center';
+  el.style.lineHeight = '1.55';
+  const line1 = document.createElement('div');
+  line1.textContent = intro;
+  const line2 = document.createElement('div');
+  line2.textContent = '垃圾郵件';
+  line2.style.fontSize = '22px';
+  line2.style.fontWeight = '800';
+  line2.style.margin = '4px 0';
+  line2.style.color = 'var(--danger)';
+  const line3 = document.createElement('div');
+  line3.textContent = '如果收件匣沒有看到，請記得檢查垃圾郵件匣。';
+  line3.style.fontSize = '12px';
+  el.append(line1, line2, line3);
+  box.prepend(el);
+  setTimeout(()=>el.remove(), 9000);
+}
 function friendlyAuthError(err){
   const map = {
     'auth/email-already-in-use':'這個 email 已經被註冊過了',
@@ -737,12 +759,17 @@ function renderEmailVerificationView(user){
           認證信已寄到<br><strong>${esc(email)}</strong><br>
           請到信箱點擊驗證連結，完成後再回到這裡。
         </p>
+        <div style="margin:12px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--paper);text-align:center;line-height:1.55;">
+          <div style="font-size:13px;color:var(--ink-soft);">⚠️ 認證信有可能會被分類到</div>
+          <div style="font-size:22px;font-weight:800;color:var(--danger);margin:2px 0;">垃圾郵件</div>
+          <div style="font-size:12px;color:var(--ink-soft);">如果收件匣沒有看到，請記得檢查垃圾郵件匣。</div>
+        </div>
         <div id="verifyMsgBox"></div>
         <button type="button" class="btn btn-accent btn-block" id="checkVerifiedBtn">我已完成驗證</button>
         <button type="button" class="btn btn-outline btn-block" id="resendVerificationBtn" style="margin-top:8px;">重新寄送認證信</button>
         <button type="button" class="btn btn-outline btn-block" id="verifyLogoutBtn" style="margin-top:8px;">登出</button>
         <p class="subtitle" style="margin:12px 0 0;font-size:12px;line-height:1.6;">
-          沒收到信？請先檢查垃圾郵件匣，或按「重新寄送認證信」。
+          還是沒收到？可以按「重新寄送認證信」。
         </p>
       </div>
     </div>
@@ -761,6 +788,12 @@ function renderEmailVerificationView(user){
       if(auth.currentUser.emailVerified){
         // 強制更新 ID token，讓 Firestore Rules 立即取得 email_verified=true。
         await auth.currentUser.getIdToken(true);
+        // 同步一份「已驗證信箱」狀態到使用者 profile，讓同團團員名單可以顯示驗證標章。
+        try{
+          await db.collection('users').doc(auth.currentUser.uid).set({ emailVerified: true }, {merge:true});
+        }catch(e){
+          console.warn('同步 Email 驗證狀態失敗：', e);
+        }
         showMsg('verifyMsgBox', 'Email 驗證完成！正在進入 App…', 'success');
         setTimeout(()=>location.reload(), 500);
       }else{
@@ -782,7 +815,7 @@ function renderEmailVerificationView(user){
     try{
       if(!auth.currentUser) throw new Error('登入狀態已失效，請重新登入');
       await auth.currentUser.sendEmailVerification();
-      showMsg('verifyMsgBox', '認證信已重新寄出，請檢查信箱。', 'success');
+      showMailNotice('verifyMsgBox', '認證信已重新寄出。信件有可能會被分類到');
       btn.textContent = '已寄出';
       setTimeout(()=>{
         if(document.body.contains(btn)){
@@ -817,6 +850,13 @@ auth.onAuthStateChanged(async (user)=>{
 
   if(user){
     topBar.classList.remove('hidden');
+    // 已通過 Firebase Email 驗證的使用者，把狀態同步到 /users/{uid}。
+    // 這個欄位只用於團員名單顯示；真正的權限仍由 Firebase Auth token + Firestore Rules 判斷。
+    try{
+      await db.collection('users').doc(user.uid).set({ emailVerified: true }, {merge:true});
+    }catch(e){
+      console.warn('同步 Email 驗證狀態失敗：', e);
+    }
     try{
       const snap = await db.collection('users').doc(user.uid).get();
       currentProfile = snap.exists ? snap.data() : {email:user.email, displayName:user.email.split('@')[0]};
@@ -916,11 +956,11 @@ function renderAuthView(){
       forgotPasswordEl.style.opacity = '0.55';
       try{
         await auth.sendPasswordResetEmail(email);
-        showMsg('authMsgBox', '如果這個 Email 有註冊帳號，重設密碼信會寄到你的信箱，請檢查收件匣與垃圾郵件匣。', 'success');
+        showMailNotice('authMsgBox', '如果這個 Email 有註冊帳號，重設密碼信會寄到你的信箱。信件有可能會被分類到');
       }catch(err){
         // 避免藉由忘記密碼功能確認某個 Email 是否已註冊。
         if(err && err.code === 'auth/user-not-found'){
-          showMsg('authMsgBox', '如果這個 Email 有註冊帳號，重設密碼信會寄到你的信箱，請檢查收件匣與垃圾郵件匣。', 'success');
+          showMailNotice('authMsgBox', '如果這個 Email 有註冊帳號，重設密碼信會寄到你的信箱。信件有可能會被分類到');
         }else{
           showMsg('authMsgBox', friendlyAuthError(err));
         }
@@ -1129,6 +1169,8 @@ async function openTrip(tripId){
     return {
       uid,
       ...data,
+      // 自己可直接以 Firebase Auth 的 emailVerified 為準；其他團員使用已同步到 profile 的狀態。
+      emailVerified: uid === currentUser.uid ? !!currentUser.emailVerified : data.emailVerified === true,
       displayName: data.displayName || data.email || '未命名成員'
     };
   });
@@ -3774,6 +3816,9 @@ async function renderMembersTab(el){
             </span>
             <span style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
               <span class="amount-neutral" style="font-size:11px;word-break:break-all;text-align:right;">${esc(m.email||'')}</span>
+              ${m.emailVerified
+                ? `<span style="font-size:11px;font-weight:700;color:var(--matcha);white-space:nowrap;">✓ 已驗證信箱</span>`
+                : `<span class="amount-neutral" style="font-size:10.5px;white-space:nowrap;">驗證狀態尚未同步</span>`}
               ${canManage ? `
                 <span style="display:flex;gap:6px;">
                   <button class="btn-danger" style="color:var(--matcha)" data-transfer-owner="${m.uid}">設為發起人</button>
