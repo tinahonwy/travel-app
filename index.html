@@ -2418,49 +2418,63 @@ function parseInlineFormatting(text){
   return result;
 }
 
-// 工具列按鈕：把選取的文字包上標記符號（例如 **文字**），沒選取的話就插入一組空標記讓使用者接著打字
-// 切換標記：如果選取範圍「內側」剛好被 before/after 包住（例如選到 **文字** 中的「文字」，
-// 或選取範圍本身含頭尾符號，例如整段選到 **文字**），就拿掉標記；否則就加上標記。
+// 工具列按鈕：把選取的文字套上/移除標記符號，行為模仿 Word 的粗體/螢光筆切換：
+// - 選取範圍外側緊鄰符號、或選取範圍本身就是完整一組符號 → 移除格式
+// - 選取範圍內格式不一致（部分有、部分沒有），或完全沒有符號 → 統一套用格式（跟 Word 一樣，混合狀態按一下全部套用）
+function escapeRegExp(str){ return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// 拆掉選取文字裡「這一種」符號的所有配對，保留內容，不影響其他種類的符號
+function stripMarkerPairs(text, marker){
+  const escaped = escapeRegExp(marker);
+  const re = new RegExp(escaped + '([\\s\\S]*?)' + escaped, 'g');
+  return text.replace(re, '$1');
+}
+
 function wrapTextareaSelection(textarea, before, after){
+  const marker = before; // 目前所有標記的頭尾符號都相同（**、==、!!、^^、~~），直接用 before 當作符號本身
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;
   const value = textarea.value;
-  const scrollTop = textarea.scrollTop; // 記住目前的捲動位置，改值後瀏覽器會重置捲動，要手動還原
+  const scrollTop = textarea.scrollTop; // 記住捲動位置，改值後瀏覽器會重置捲動，要手動還原
   const selected = value.slice(start, end);
+  const mLen = marker.length;
 
-  const bLen = before.length, aLen = after.length;
-  let newValue, cursorStart, cursorEnd, removed = false;
+  let newValue, cursorStart, cursorEnd;
 
-  // 情況一：選取範圍「本身」頭尾就是符號，例如選到完整的 **文字**
-  if(selected.startsWith(before) && selected.endsWith(after) && selected.length >= bLen + aLen){
-    const inner = selected.slice(bLen, selected.length - aLen);
+  // 情況一：選取範圍「外側」剛好緊鄰符號，例如選到「文字」但外面就是 ==…==
+  if(
+    selected.length > 0 &&
+    value.slice(start - mLen, start) === marker &&
+    value.slice(end, end + mLen) === marker
+  ){
+    newValue = value.slice(0, start - mLen) + selected + value.slice(end + mLen);
+    cursorStart = start - mLen;
+    cursorEnd = cursorStart + selected.length;
+  }
+  // 情況二：選取範圍「本身」整段就是完整的一組符號，例如選到完整的 ==文字==
+  else if(
+    selected.length >= mLen * 2 &&
+    selected.startsWith(marker) &&
+    selected.endsWith(marker)
+  ){
+    const inner = selected.slice(mLen, selected.length - mLen);
     newValue = value.slice(0, start) + inner + value.slice(end);
     cursorStart = start;
     cursorEnd = start + inner.length;
-    removed = true;
   }
-  // 情況二：選取範圍「外側」剛好緊鄰符號，例如選到「文字」但外面就是 **…**
-  else if(
-    value.slice(start - bLen, start) === before &&
-    value.slice(end, end + aLen) === after
-  ){
-    newValue = value.slice(0, start - bLen) + selected + value.slice(end + aLen);
-    cursorStart = start - bLen;
-    cursorEnd = cursorStart + selected.length;
-    removed = true;
-  }
-  // 情況三：都沒有符號，加上標記
+  // 情況三：選取範圍裡格式不一致（部分有符號、部分沒有），或完全沒有符號 →
+  // 先拆掉選取範圍內所有這個符號的配對，再把整段選取範圍統一重新包起來
   else {
-    newValue = value.slice(0, start) + before + selected + after + value.slice(end);
-    cursorStart = start + bLen;
-    cursorEnd = cursorStart + selected.length;
+    const stripped = stripMarkerPairs(selected, marker);
+    newValue = value.slice(0, start) + marker + stripped + marker + value.slice(end);
+    cursorStart = start + mLen;
+    cursorEnd = cursorStart + stripped.length;
   }
 
   textarea.value = newValue;
   textarea.focus();
   textarea.setSelectionRange(cursorStart, cursorEnd);
   textarea.scrollTop = scrollTop;
-  return removed;
 }
 function bindFormatToolbar(scopeEl, textarea){
   scopeEl.querySelectorAll('[data-fmt]').forEach(btn=>{
