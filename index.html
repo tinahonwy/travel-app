@@ -2487,10 +2487,13 @@ function postEditFormHTML(p){
     <div class="edit-item-form" data-post-row="${p.id}">
         <div class="field">
         <div class="format-toolbar">
-            <button type="button" class="format-btn format-btn-bold" data-fmt="bold" title="粗體">B 粗體</button>
-            <button type="button" class="format-btn format-btn-highlight" data-fmt="highlight" title="螢光筆重點">🖍️ 螢光筆</button>
-            <button type="button" class="format-btn format-btn-warn" data-fmt="warn" title="紅字強調">🔴 紅字</button>
+        <button type="button" class="format-btn format-btn-bold" data-fmt="bold" title="粗體">B 粗體</button>
+        <button type="button" class="format-btn format-btn-highlight" data-fmt="highlight" title="螢光筆重點">🖍️ 螢光筆</button>
+        <button type="button" class="format-btn format-btn-warn" data-fmt="warn" title="紅字強調">🔴 紅字</button>
+        <button type="button" class="format-btn format-btn-big" data-fmt="big" title="放大字體">A+ 放大</button>
+        <button type="button" class="format-btn format-btn-small" data-fmt="small" title="縮小字體">A- 縮小</button>
         </div>
+ 
         <textarea class="post-e-text" rows="8" placeholder="也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;">${esc(p.text||'')}</textarea>
         <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上</p>
         </div>
@@ -2537,7 +2540,7 @@ async function renderPostsTab(el){
         <button type="button" class="format-btn format-btn-big" data-fmt="big" title="放大字體">A+ 放大</button>
         <button type="button" class="format-btn format-btn-small" data-fmt="small" title="縮小字體">A- 縮小</button>
         </div>
-        <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" ...
+        <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;"></textarea>
         <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案。選取文字後按上面的按鈕可以畫重點</p>
         </div>
         <div class="field">
