@@ -1713,13 +1713,16 @@ async function renderWeatherSection(){
 }
 
 // ---------------- 匯率換算小工具（open.er-api.com，免金鑰） ----------------
-async function fetchRates(){
+async function fetchRates(forceRefresh=false){
   const now = Date.now();
-  if(ratesCache && (now - ratesCache.fetchedAt) < 6*60*60*1000) return ratesCache.rates;
-  const res = await fetch('https://open.er-api.com/v6/latest/TWD');
+  // 一般換算 6 小時內使用快取，避免每按一個數字就重新呼叫 API；
+  // 使用者按「即時匯率」時則 forceRefresh=true，強制重新向 API 查詢。
+  if(!forceRefresh && ratesCache && (now - ratesCache.fetchedAt) < 6*60*60*1000) return ratesCache.rates;
+  const res = await fetch(`https://open.er-api.com/v6/latest/TWD?_=${now}`, {cache:'no-store'});
+  if(!res.ok) throw new Error('匯率服務目前無法連線');
   const data = await res.json();
   if(data.result !== 'success') throw new Error('匯率資料取得失敗');
-  ratesCache = {rates:data.rates, fetchedAt:now};
+  ratesCache = {rates:data.rates, fetchedAt:Date.now()};
   return data.rates;
 }
 async function fillLiveRate(currencyEl, rateEl, btn){
@@ -1784,7 +1787,10 @@ function currencyToolCardHTML(){
   return `
     <div class="card" id="currencyToolCard">
       <h2>💱 匯率換算小工具</h2>
-      <div class="field">${currencySelectHTML('JPY','', 'id="ctCurrency"')}</div>
+      <div class="field" style="display:flex;gap:8px;align-items:stretch;">
+        <div style="flex:1;min-width:0;">${currencySelectHTML('JPY','', 'id="ctCurrency"')}</div>
+        <button type="button" class="btn btn-outline" id="ctRefreshRateBtn" style="flex-shrink:0;padding:8px 13px;font-size:12.5px;white-space:nowrap;">🔄 即時匯率</button>
+      </div>
       <div style="display:flex;gap:16px;margin:2px 0 10px;font-size:13px;color:var(--ink-soft);flex-wrap:wrap;">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toTWD" checked> 外幣 → 台幣</label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toForeign"> 台幣 → 外幣</label>
@@ -1823,17 +1829,18 @@ function bindCurrencyTool(scopeEl){
   const currencyEl = card.querySelector('#ctCurrency');
   const resultEl = card.querySelector('#ctResult');
   const metaEl = card.querySelector('#ctMeta');
+  const refreshBtn = card.querySelector('#ctRefreshRateBtn');
   let expr = '1';
 
   function renderDisplay(){
     displayEl.textContent = expr === '' ? '0' : expr;
   }
 
-  async function update(){
-    resultEl.textContent = '載入匯率中…';
+  async function update(forceRefresh=false){
+    resultEl.textContent = forceRefresh ? '正在搜尋最新匯率…' : '載入匯率中…';
     metaEl.textContent = '';
     try{
-      const rates = await fetchRates();
+      const rates = await fetchRates(forceRefresh);
       const code = currencyEl.value;
       const direction = card.querySelector('input[name="ctDirection"]:checked').value;
       if(code==='OTHER'){ resultEl.textContent = '這個幣別沒有即時匯率，請自行輸入'; return; }
@@ -1851,7 +1858,10 @@ function bindCurrencyTool(scopeEl){
         resultEl.textContent = `= NT$ ${fmtNum(raw)} ≈ ${fmtNum(foreign)} ${code}`;
       }
       const oneUnitTWD = 1/rate;
-      metaEl.textContent = `參考匯率：1 ${code} ≈ NT$ ${oneUnitTWD.toFixed(3)}（僅供參考，非即時交易匯率）`;
+      const fetchedTime = ratesCache && ratesCache.fetchedAt
+        ? new Date(ratesCache.fetchedAt).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'})
+        : '';
+      metaEl.textContent = `參考匯率：1 ${code} ≈ NT$ ${oneUnitTWD.toFixed(3)}${fetchedTime ? ` · 查詢 ${fetchedTime}` : ''}（僅供參考，非即時交易匯率）`;
     }catch(err){
       resultEl.textContent = '匯率載入失敗，請檢查網路連線';
     }
@@ -1869,6 +1879,19 @@ function bindCurrencyTool(scopeEl){
   });
   currencyEl.onchange = update;
   card.querySelectorAll('input[name="ctDirection"]').forEach(r=>{ r.onchange = update; });
+  if(refreshBtn){
+    refreshBtn.onclick = async ()=>{
+      const originalText = refreshBtn.textContent;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = '搜尋中…';
+      try{
+        await update(true);
+      }finally{
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = originalText;
+      }
+    };
+  }
 
   renderDisplay();
   update();
