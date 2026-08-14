@@ -198,6 +198,14 @@
   .gallery-close{position:absolute;top:18px;right:18px;background:rgba(0,0,0,.45);color:#fff;border:none;border-radius:50%;width:34px;height:34px;font-size:16px;cursor:pointer;}
 
   .empty-state{text-align:center;padding:36px 16px;color:var(--muted);font-size:13.5px;}
+.offline-banner{position:fixed;top:0;left:0;right:0;z-index:600;background:var(--vermillion);color:#fff;font-size:12.5px;padding:9px 14px;text-align:center;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+body.app-offline .top-bar{margin-top:38px;}
+body.app-offline button:not(.tab-btn):not(.modal-close):not(.gallery-nav):not(.gallery-close):not(.post-readmore-btn):not(#profileBtn):not(#logoutBtn):not(#backBtn):not(#reconnectConfirmBtn){
+  opacity:.5; pointer-events:none; cursor:not-allowed;
+}
+body.app-offline input, body.app-offline select, body.app-offline textarea{
+  opacity:.6; pointer-events:none;
+}
   .message{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
   .message.error{background:#FBEAE7;color:var(--danger);}
   .message.success{background:#E8EFDD;color:var(--matcha);}
@@ -244,6 +252,7 @@
 </style>
 </head>
 <body>
+<div id="offlineBanner" class="offline-banner hidden">📡 目前離線，畫面顯示最後一次連線的內容，新增/編輯功能已暫停</div>
 <div id="topBar" class="top-bar hidden">
   <div class="brand"><span class="stamp">旅</span> 一起去旅行</div>
   <div class="user-info">
@@ -287,6 +296,134 @@ let ratesCache = null; // {rates:{...}, fetchedAt}
 const tabDataCache = {}; // avoids refetching from Firestore every time you switch tabs
 function tabCacheKey(name, extra){ return currentTrip.id + '|' + name + (extra?('|'+extra):''); }
 function clearTabCache(name, extra){ delete tabDataCache[tabCacheKey(name, extra)]; }
+// ------------------------------------------------------------
+// 離線管理：斷網時保留畫面現況、鎖定所有寫入操作（表單、按鈕、輸入框），
+// 只在頂部顯示提示條；網路恢復時跳出確認彈窗，使用者按下確定才重新整理頁面拿最新資料，
+// 避免資料還沒同步完成前使用者就急著操作，寫入到過期的畫面狀態。
+// ------------------------------------------------------------
+let appIsOnline = navigator.onLine;
+let internetCheckBusy = false;
+const INTERNET_TEST_URL = 'https://www.gstatic.com/generate_204';
+
+function updateOfflineUI(){
+  document.body.classList.toggle('app-offline', !appIsOnline);
+  const banner = document.getElementById('offlineBanner');
+  if(banner) banner.classList.toggle('hidden', appIsOnline);
+}
+
+function goOffline(){
+  appIsOnline = false;
+  updateOfflineUI();
+}
+
+function showReconnectModal(){
+  if(document.getElementById('reconnectModal')) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'reconnectModal';
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:340px;text-align:center;">
+      <div style="font-size:40px;margin-bottom:10px;">🔄</div>
+      <h3 style="margin-bottom:8px;">網路已恢復</h3>
+      <p class="subtitle" style="margin-bottom:18px;">按下確定，重新整理取得最新的行程資料</p>
+      <button class="btn btn-accent btn-block" id="reconnectConfirmBtn">確定，更新畫面</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('reconnectConfirmBtn').onclick = ()=>{
+    location.reload();
+  };
+}
+
+function goOnline(){
+  if(appIsOnline) return;
+  // 不立刻解除鎖定：等使用者按「確定」重新整理後，才重新取得最新資料
+  showReconnectModal();
+}
+
+// Android WebView 的 navigator.onLine 有時只代表「網路介面存在」，
+// 不代表真的連得到外網。因此額外發一個很小的網路請求做實際確認。
+async function hasRealInternet(){
+  if(!navigator.onLine) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), 2500);
+  try{
+    await fetch(INTERNET_TEST_URL + '?t=' + Date.now(), {
+      method:'GET',
+      mode:'no-cors',
+      cache:'no-store',
+      signal:controller.signal
+    });
+    return true;
+  }catch(e){
+    return false;
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
+async function checkOnlineStatus(){
+  if(internetCheckBusy) return;
+  internetCheckBusy = true;
+  try{
+    const reallyOnline = await hasRealInternet();
+    if(reallyOnline){
+      if(!appIsOnline) goOnline();
+    }else{
+      goOffline();
+    }
+  }finally{
+    internetCheckBusy = false;
+  }
+}
+
+window.addEventListener('offline', goOffline);
+window.addEventListener('online', ()=>checkOnlineStatus());
+setInterval(()=>checkOnlineStatus(), 3000);
+
+// 全域攔截：離線時任何表單送出（Enter 鍵、submit 按鈕）一律擋下，防止寫入 Firestore
+document.addEventListener('submit', (e)=>{
+  if(!appIsOnline){
+    e.preventDefault();
+    e.stopPropagation();
+    alert('目前離線，請連上網路後再試');
+  }
+}, true);
+
+// 行程清單的本機備份：只儲存列表畫面需要的欄位。
+// 用途是 App 在離線狀態重新開啟時，不要把「讀不到伺服器」誤顯示成「沒有任何行程」。
+function tripListCacheKey(){
+  return currentUser ? 'travelApp.tripList.' + currentUser.uid : null;
+}
+function saveTripListCache(trips){
+  const key = tripListCacheKey();
+  if(!key) return;
+  try{
+    const compact = trips.map(t=>({
+      id:t.id,
+      name:t.name || '',
+      startDate:t.startDate || '',
+      endDate:t.endDate || '',
+      members:Array.isArray(t.members) ? t.members : []
+    }));
+    localStorage.setItem(key, JSON.stringify({savedAt:Date.now(), trips:compact}));
+  }catch(e){}
+}
+function loadTripListCache(){
+  const key = tripListCacheKey();
+  if(!key) return [];
+  try{
+    const raw = localStorage.getItem(key);
+    if(!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.trips) ? parsed.trips : [];
+  }catch(e){
+    return [];
+  }
+}
+
+updateOfflineUI();
+checkOnlineStatus();
 
 const root = document.getElementById('root');
 const topBar = document.getElementById('topBar');
@@ -602,10 +739,17 @@ auth.onAuthStateChanged(async (user)=>{
       let opened = false;
       try{ opened = await openTrip(currentProfile.defaultTripId); }catch(e){ opened = false; }
       if(!opened){
-        // 預設行程可能被刪除了，或你已經不是團員了，自動清掉這個設定避免下次又卡住
-        try{ await db.collection('users').doc(user.uid).update({ defaultTripId: firebase.firestore.FieldValue.delete() }); }catch(e){}
-        delete currentProfile.defaultTripId;
-        await renderTripsView();
+        // openTrip 失敗不一定代表預設行程被刪除，也可能只是現在沒有網路。
+        // 只有確認真的連得到外網時，才把失效的 defaultTripId 清掉；離線時完全不做寫入。
+        const reallyOnline = await hasRealInternet();
+        if(!reallyOnline){
+          goOffline();
+          await renderTripsView();
+        }else{
+          try{ await db.collection('users').doc(user.uid).update({ defaultTripId: firebase.firestore.FieldValue.delete() }); }catch(e){}
+          delete currentProfile.defaultTripId;
+          await renderTripsView();
+        }
       }
     } else {
       await renderTripsView();
@@ -766,12 +910,34 @@ async function renderTripsView(){
     }
   };
 
-  const snap = await db.collection('trips').where('members','array-contains', currentUser.uid).get();
-  const trips = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  let trips = [];
+  let loadedFromOfflineCache = false;
+  try{
+    // 強制向 Firestore 伺服器取資料。
+    // 若沒網路就一定會進 catch，不讓 Firestore 的本機空快取被誤判成「真的沒有行程」。
+    const snap = await db.collection('trips')
+      .where('members','array-contains', currentUser.uid)
+      .get({source:'server'});
+    trips = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    saveTripListCache(trips);
+  }catch(err){
+    goOffline();
+    trips = loadTripListCache();
+    loadedFromOfflineCache = trips.length > 0;
+    if(!loadedFromOfflineCache){
+      document.getElementById('tripList').innerHTML = `<div class="empty-state">目前離線，暫時無法取得行程資料。連上網路後會提示你更新畫面。</div>`;
+      return;
+    }
+  }
+
   const listEl = document.getElementById('tripList');
   if(trips.length===0){
+    // 只有「成功連到伺服器，而且伺服器真的回傳 0 筆」時，才顯示沒有行程。
     listEl.innerHTML = `<div class="empty-state">還沒有任何行程，建立一個開始規劃吧</div>`;
     return;
+  }
+  if(loadedFromOfflineCache){
+    listEl.insertAdjacentHTML('beforebegin', `<div class="message" style="background:#FFF3E6;color:var(--vermillion);margin-bottom:12px;">📡 目前離線，以下為上次成功連線時的行程清單</div>`);
   }
   listEl.innerHTML = trips.map(t=>{
     const isDefault = currentProfile && currentProfile.defaultTripId === t.id;
