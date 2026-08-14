@@ -2418,52 +2418,80 @@ function parseInlineFormatting(text){
   return result;
 }
 
-// 工具列按鈕：把選取的文字套上/移除標記符號，行為模仿 Word 的粗體/螢光筆切換：
-// - 選取範圍外側緊鄰符號、或選取範圍本身就是完整一組符號 → 移除格式
-// - 選取範圍內格式不一致（部分有、部分沒有），或完全沒有符號 → 統一套用格式（跟 Word 一樣，混合狀態按一下全部套用）
+// 工具列按鈕：把選取的文字套上/移除標記符號，行為模仿 Word：
+// - 選取範圍如果切到某一組符號的一半，先自動擴張選取範圍，完整包住那一組符號，
+//   避免符號被攔腰切開、留下沒有配對的孤兒符號（這是之前亂點會壞掉的主因）。
+// - 擴張完成後：範圍剛好等於外側緊鄰符號、或範圍本身就是完整一組 → 移除格式；
+//   其餘情況（範圍內格式不一致，或完全沒有符號）→ 統一套用格式。
 function escapeRegExp(str){ return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-// 拆掉選取文字裡「這一種」符號的所有配對，保留內容，不影響其他種類的符號
+// 拆掉文字裡「這一種」符號的所有配對，保留內容，不影響其他種類的符號
 function stripMarkerPairs(text, marker){
   const escaped = escapeRegExp(marker);
   const re = new RegExp(escaped + '([\\s\\S]*?)' + escaped, 'g');
   return text.replace(re, '$1');
 }
 
+// 掃出整份文字裡，這種符號的所有完整配對範圍（依序、不重疊）
+function findMarkerPairs(text, marker){
+  const pairs = [];
+  const mLen = marker.length;
+  let i = 0;
+  while(i <= text.length - mLen){
+    if(text.startsWith(marker, i)){
+      const closeIdx = text.indexOf(marker, i + mLen);
+      if(closeIdx === -1) break; // 找不到收尾符號，後面都當純文字，不用再掃
+      pairs.push({ start:i, end: closeIdx + mLen });
+      i = closeIdx + mLen;
+      continue;
+    }
+    i++;
+  }
+  return pairs;
+}
+
 function wrapTextareaSelection(textarea, before, after){
   const marker = before; // 目前所有標記的頭尾符號都相同（**、==、!!、^^、~~），直接用 before 當作符號本身
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
+  const mLen = marker.length;
   const value = textarea.value;
   const scrollTop = textarea.scrollTop; // 記住捲動位置，改值後瀏覽器會重置捲動，要手動還原
-  const selected = value.slice(start, end);
-  const mLen = marker.length;
+  let start = textarea.selectionStart;
+  let end = textarea.selectionEnd;
 
+  // 第一步：如果選取範圍切到任何一組符號的一半，往外擴張到完整包住那一組
+  let expanded = true;
+  let guard = 0;
+  while(expanded && guard < 10){
+    expanded = false;
+    guard++;
+    const pairs = findMarkerPairs(value, marker);
+    for(const p of pairs){
+      const overlaps = p.start < end && p.end > start;
+      const fullyInside = p.start >= start && p.end <= end;
+      if(overlaps && !fullyInside){
+        if(p.start < start){ start = p.start; expanded = true; }
+        if(p.end > end){ end = p.end; expanded = true; }
+      }
+    }
+  }
+
+  // 第二步：選取範圍外側如果剛好緊鄰符號（例如選到「文字」但外面就是 ==…==），也一併吃進來
+  if(value.slice(start - mLen, start) === marker && value.slice(end, end + mLen) === marker){
+    start -= mLen;
+    end += mLen;
+  }
+
+  const selected = value.slice(start, end);
   let newValue, cursorStart, cursorEnd;
 
-  // 情況一：選取範圍「外側」剛好緊鄰符號，例如選到「文字」但外面就是 ==…==
-  if(
-    selected.length > 0 &&
-    value.slice(start - mLen, start) === marker &&
-    value.slice(end, end + mLen) === marker
-  ){
-    newValue = value.slice(0, start - mLen) + selected + value.slice(end + mLen);
-    cursorStart = start - mLen;
-    cursorEnd = cursorStart + selected.length;
-  }
-  // 情況二：選取範圍「本身」整段就是完整的一組符號，例如選到完整的 ==文字==
-  else if(
-    selected.length >= mLen * 2 &&
-    selected.startsWith(marker) &&
-    selected.endsWith(marker)
-  ){
+  // 情況一：選取範圍本身頭尾就是完整的一組符號 → 移除格式
+  if(selected.length >= mLen * 2 && selected.startsWith(marker) && selected.endsWith(marker)){
     const inner = selected.slice(mLen, selected.length - mLen);
     newValue = value.slice(0, start) + inner + value.slice(end);
     cursorStart = start;
     cursorEnd = start + inner.length;
   }
-  // 情況三：選取範圍裡格式不一致（部分有符號、部分沒有），或完全沒有符號 →
-  // 先拆掉選取範圍內所有這個符號的配對，再把整段選取範圍統一重新包起來
+  // 情況二：格式不一致或完全沒有符號 → 先拆掉選取範圍內所有這個符號的配對，再統一整段套上
   else {
     const stripped = stripMarkerPairs(selected, marker);
     newValue = value.slice(0, start) + marker + stripped + marker + value.slice(end);
