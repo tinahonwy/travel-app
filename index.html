@@ -178,7 +178,7 @@
   .post-e-img-thumb-wrap{position:relative;width:76px;height:76px;flex-shrink:0;}
   .post-e-img-thumb{width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--border);display:block;}
   .post-e-img-remove{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:2px solid var(--paper-card);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
-  .post-e-img-remove{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:2px solid var(--paper-card);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
+  
 .format-toolbar{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
 .format-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--paper-card);font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink-soft);}
 .format-btn:active{transform:scale(.95);}
@@ -2395,18 +2395,48 @@ function linkifyText(text){
 }
 
 // 工具列按鈕：把選取的文字包上標記符號（例如 **文字**），沒選取的話就插入一組空標記讓使用者接著打字
+// 切換標記：如果選取範圍「內側」剛好被 before/after 包住（例如選到 **文字** 中的「文字」，
+// 或選取範圍本身含頭尾符號，例如整段選到 **文字**），就拿掉標記；否則就加上標記。
 function wrapTextareaSelection(textarea, before, after){
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;
   const value = textarea.value;
   const scrollTop = textarea.scrollTop; // 記住目前的捲動位置，改值後瀏覽器會重置捲動，要手動還原
   const selected = value.slice(start, end);
-  textarea.value = value.slice(0, start) + before + selected + after + value.slice(end);
-  const cursorStart = start + before.length;
-  const cursorEnd = cursorStart + selected.length;
+
+  const bLen = before.length, aLen = after.length;
+  let newValue, cursorStart, cursorEnd, removed = false;
+
+  // 情況一：選取範圍「本身」頭尾就是符號，例如選到完整的 **文字**
+  if(selected.startsWith(before) && selected.endsWith(after) && selected.length >= bLen + aLen){
+    const inner = selected.slice(bLen, selected.length - aLen);
+    newValue = value.slice(0, start) + inner + value.slice(end);
+    cursorStart = start;
+    cursorEnd = start + inner.length;
+    removed = true;
+  }
+  // 情況二：選取範圍「外側」剛好緊鄰符號，例如選到「文字」但外面就是 **…**
+  else if(
+    value.slice(start - bLen, start) === before &&
+    value.slice(end, end + aLen) === after
+  ){
+    newValue = value.slice(0, start - bLen) + selected + value.slice(end + aLen);
+    cursorStart = start - bLen;
+    cursorEnd = cursorStart + selected.length;
+    removed = true;
+  }
+  // 情況三：都沒有符號，加上標記
+  else {
+    newValue = value.slice(0, start) + before + selected + after + value.slice(end);
+    cursorStart = start + bLen;
+    cursorEnd = cursorStart + selected.length;
+  }
+
+  textarea.value = newValue;
   textarea.focus();
   textarea.setSelectionRange(cursorStart, cursorEnd);
   textarea.scrollTop = scrollTop;
+  return removed;
 }
 function bindFormatToolbar(scopeEl, textarea){
   scopeEl.querySelectorAll('[data-fmt]').forEach(btn=>{
