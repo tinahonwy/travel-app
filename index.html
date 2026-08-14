@@ -2358,17 +2358,32 @@ function formatPostTime(ts){
 // 把純文字裡的網址自動轉成可以點擊的連結（先安全跳脫文字，再插入連結標籤，避免 XSS）
 // 把純文字裡的網址轉成可點擊連結，並支援簡單的畫重點標記：
 // **文字** → 粗體、==文字== → 螢光筆重點、!!文字!! → 紅字強調
+// 畫重點標記解析：**粗體**、==螢光筆==、!!紅字!!、^^放大^^、~~縮小~~，並支援自動偵測網址。
+// 用「剝洋蔥」式的遞迴解析（先抓最外層符號，內容再重新解析一次），
+// 這樣不管疊加幾種格式、用什麼順序疊加（例如粗體裡包紅字），都能正確巢狀渲染，
+// 不會像單次掃描那樣，一疊加就把內層符號當成純文字印出來。
+const INLINE_MARKERS = [
+  { open:'**', tag:(inner)=>`<strong>${inner}</strong>` },
+  { open:'==', tag:(inner)=>`<mark>${inner}</mark>` },
+  { open:'!!', tag:(inner)=>`<strong style="color:var(--vermillion);">${inner}</strong>` },
+  { open:'^^', tag:(inner)=>`<span style="font-size:1.4em;font-weight:600;line-height:1.3;">${inner}</span>` },
+  { open:'~~', tag:(inner)=>`<span style="font-size:0.82em;color:var(--muted);">${inner}</span>` }
+];
 function linkifyText(text){
   if(!text) return '';
-  const tokenRegex = /(https?:\/\/[^\s<>"']+)|\*\*([^\n*]+?)\*\*|==([^\n=]+?)==|!!([^\n!]+?)!!|\^\^([^\n^]+?)\^\^|~~([^\n~]+?)~~/g;
+  return parseInlineFormatting(text);
+}
+function parseInlineFormatting(text){
+  const urlRegex = /^https?:\/\/[^\s<>"']+/i;
   const trailingPunct = /[.,;:!?)\]}]+$/;
   let result = '';
-  let lastIndex = 0;
-  let match;
-  while((match = tokenRegex.exec(text)) !== null){
-    result += esc(text.slice(lastIndex, match.index));
-    if(match[1]){
-      let url = match[1];
+  let i = 0;
+  while(i < text.length){
+    // 先試著在目前位置比對網址
+    const remaining = text.slice(i);
+    const urlMatch = remaining.match(urlRegex);
+    if(urlMatch){
+      let url = urlMatch[0];
       let trailing = '';
       const trailMatch = url.match(trailingPunct);
       if(trailMatch){
@@ -2377,20 +2392,29 @@ function linkifyText(text){
       }
       result += `<a href="${esc(url)}" target="_blank" rel="noopener">${linkIconHTML(url)}${esc(url)}</a>`;
       result += esc(trailing);
-    } else if(match[2] !== undefined){
-      result += `<strong>${esc(match[2])}</strong>`;
-    } else if(match[3] !== undefined){
-      result += `<mark>${esc(match[3])}</mark>`;
-    } else if(match[4] !== undefined){
-      result += `<strong style="color:var(--vermillion);">${esc(match[4])}</strong>`;
-    } else if(match[5] !== undefined){
-      result += `<span style="font-size:1.4em;font-weight:600;line-height:1.3;">${esc(match[5])}</span>`;
-    } else if(match[6] !== undefined){
-      result += `<span style="font-size:0.82em;color:var(--muted);">${esc(match[6])}</span>`;
+      i += url.length + trailing.length;
+      continue;
     }
-    lastIndex = match.index + match[0].length;
+    // 再試著比對畫重點符號（找到最近的一組配對符號）
+    let matched = null;
+    for(const marker of INLINE_MARKERS){
+      if(text.startsWith(marker.open, i)){
+        const closeIdx = text.indexOf(marker.open, i + marker.open.length);
+        if(closeIdx !== -1){ matched = { marker, closeIdx }; break; }
+      }
+    }
+    if(matched){
+      const { marker, closeIdx } = matched;
+      const innerText = text.slice(i + marker.open.length, closeIdx);
+      const innerHTML = parseInlineFormatting(innerText); // 遞迴：內容裡如果還有其他符號，會在這裡繼續被解析
+      result += marker.tag(innerHTML);
+      i = closeIdx + marker.open.length;
+      continue;
+    }
+    // 都沒有符合，當成一般文字
+    result += esc(text[i]);
+    i++;
   }
-  result += esc(text.slice(lastIndex));
   return result;
 }
 
