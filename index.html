@@ -2437,7 +2437,7 @@ function postEditFormHTML(p){
   return `
     <div class="edit-item-form" data-post-row="${p.id}">
       <div class="field">
-        <textarea class="post-e-text" rows="4" placeholder="也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
+        <textarea class="post-e-text" rows="8" placeholder="也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper-card);color:var(--ink);resize:vertical;font-family:var(--font-body);">${esc(p.text||'')}</textarea>
         <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上</p>
       </div>
       <div class="field">
@@ -2476,7 +2476,7 @@ async function renderPostsTab(el){
       <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
       <form id="addPostForm">
         <div class="field">
-          <textarea id="postText" rows="4" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);"></textarea>
+          <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;"></textarea>
           <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案</p>
         </div>
         <div class="field">
