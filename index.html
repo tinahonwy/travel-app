@@ -227,6 +227,8 @@ body.app-offline input, body.app-offline select, body.app-offline textarea{
   .item-row.item-row-private{background:#FBF8F1;border-radius:8px;padding:9px 8px;border-bottom:1px dashed var(--border);}
   .item-private-tag{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--matcha);background:#E8EFDD;padding:1px 7px;border-radius:999px;margin-top:4px;}
   .private-visibility-box{background:var(--paper);}
+  .day-block-today{border:2px solid var(--vermillion);box-shadow:0 0 0 3px var(--vermillion-soft);}
+  .today-badge{font-size:11px;background:var(--vermillion);color:#fff;padding:2px 8px;border-radius:999px;margin-left:6px;vertical-align:middle;white-space:nowrap;}
   @media (max-width:640px){
     .items-columns{flex-direction:column;}
     .items-columns .items-side{flex:1;max-width:none;border-left:none;border-top:2px dashed var(--border);padding-left:0;padding-top:10px;margin-top:4px;}
@@ -2412,21 +2414,38 @@ async function renderOverviewTab(el){
     document.getElementById('goToPlanningBtn').onclick = ()=>{ activeTab='itinerary'; updateTabUI(); renderTabContent(); };
     return;
   }
-  el.innerHTML = bannerHTML + days.map(d=>`
-    <div class="card">
+
+  const today = todayStr();
+  const hasToday = days.some(d=>d.date===today);
+
+  el.innerHTML = bannerHTML + days.map(d=>{
+    const isToday = d.date === today;
+    return `
+    <div class="card ${isToday ? 'day-block-today' : ''}" data-day-date="${d.date}">
       <div class="day-block-inner">
         <div class="day-weekday">${weekdayLabel(d.date)}</div>
         <div class="day-content">
       <div class="day-header">
-        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
+        <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong>${isToday ? ' <span class="today-badge">🔵 今天</span>' : ''}</div>
       </div>
       <div class="items-container" data-overview-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
         </div>
       </div>
     </div>
-  `).join('');
+  `;}).join('');
+
   document.getElementById('goToPlanningBtn').onclick = ()=>{ activeTab='itinerary'; updateTabUI(); renderTabContent(); };
-  for(const d of days){ renderOverviewItemsFor(d.id); }
+
+  await Promise.all(days.map(d=>renderOverviewItemsFor(d.id)));
+
+  if(hasToday){
+    const todayEl = el.querySelector(`[data-day-date="${today}"]`);
+    if(todayEl){
+      setTimeout(()=>{
+        todayEl.scrollIntoView({behavior:'smooth', block:'start'});
+      }, 30);
+    }
+  }
 }
 
 function overviewItemRowHTML(it){
