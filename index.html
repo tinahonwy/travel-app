@@ -3676,6 +3676,28 @@ async function renderExpensesTab(el){
 function cashWalletCollectionRef(){
   return db.collection('trips').doc(currentTrip.id).collection('cashWallets').doc(currentUser.uid);
 }
+  // 記住上次設定現金餘額用的幣別/匯率，存在手機本機（跟帳號+行程綁定）。
+// 這樣「重新設定」或第一次設定時，表單會自動帶入上次的選擇，不用每次重選幣別、重抓匯率。
+function cashSettingsCacheKey(){
+  return (currentUser && currentTrip) ? 'travelApp.cashSettings.' + currentTrip.id + '.' + currentUser.uid : null;
+}
+function saveCashSettingsCache(currency, exchangeRate, customCurrencyName){
+  const key = cashSettingsCacheKey();
+  if(!key) return;
+  try{
+    localStorage.setItem(key, JSON.stringify({currency, exchangeRate, customCurrencyName}));
+  }catch(e){}
+}
+function loadCashSettingsCache(){
+  const key = cashSettingsCacheKey();
+  if(!key) return null;
+  try{
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){
+    return null;
+  }
+}
 // 把一筆花費（已知它換算成新台幣是多少）反推回「現金錢包幣別」該扣多少單位。
 // 做法：花費先換算成台幣（沿用 toTWD），再用現金錢包自己的匯率把台幣換回錢包幣別的單位數。
 function convertToWalletUnits(amountTWD, wallet){
@@ -3687,20 +3709,25 @@ function convertToWalletUnits(amountTWD, wallet){
 }
 function cashWalletCardHTML(wallet){
   if(!wallet){
+    const last = loadCashSettingsCache();
+    const lastCurrency = last ? last.currency : 'JPY';
+    const lastRate = (last && last.exchangeRate && last.currency!=='TWD') ? last.exchangeRate : '';
+    const lastOtherName = last ? (last.customCurrencyName||'') : '';
     return `
       <div class="card" style="border-left:4px solid var(--matcha);">
         <h2>💵 現金餘額</h2>
         <p class="subtitle" style="margin-bottom:12px;">記錄你這趟帶了多少現金，之後記帳時可以勾選「用現金支付」直接從這裡扣款，方便掌握身上現金還剩多少</p>
+        ${last ? `<p class="subtitle" style="margin:-6px 0 12px;font-size:12px;">已自動帶入上次使用的幣別／匯率，只要輸入金額即可</p>` : ''}
         <form id="setCashForm">
           <div class="field-row">
             <div class="field" style="flex:2"><label>帶了多少現金</label><input type="number" id="cashAmount" min="0" step="0.01" required></div>
-            <div class="field"><label>幣別</label>${currencySelectHTML('JPY','', 'id="cashCurrency"')}</div>
+            <div class="field"><label>幣別</label>${currencySelectHTML(lastCurrency,'', 'id="cashCurrency"')}</div>
           </div>
-          <div class="field hidden" id="cashOtherCurrencyField"><label>幣別名稱</label><input type="text" id="cashOtherCurrency" placeholder="例如：越南盾（現金）" maxlength="20"></div>
+          <div class="field ${lastCurrency==='OTHER'?'':'hidden'}" id="cashOtherCurrencyField"><label>幣別名稱</label><input type="text" id="cashOtherCurrency" value="${esc(lastOtherName)}" placeholder="例如：越南盾（現金）" maxlength="20"></div>
           <div class="field">
             <label>匯率（1 單位 = ? 台幣）</label>
             <div style="display:flex;gap:6px;">
-              <input type="number" id="cashRate" min="0" step="0.0001" placeholder="1" style="flex:1;">
+              <input type="number" id="cashRate" min="0" step="0.0001" placeholder="1" value="${esc(lastRate)}" ${lastCurrency==='TWD'?'disabled':''} style="flex:1;">
               <button type="button" class="btn btn-outline" id="cashRateLiveBtn" style="flex-shrink:0;padding:8px 12px;font-size:12.5px;white-space:nowrap;">抓即時匯率</button>
             </div>
           </div>
@@ -3843,6 +3870,7 @@ async function renderPersonalTab(el){
           amount, currency, exchangeRate, customCurrencyName,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        saveCashSettingsCache(currency, exchangeRate, customCurrencyName);
         renderPersonalTab(el);
       }catch(err){
         alert('設定失敗，請檢查網路連線：'+err.message);
