@@ -3672,8 +3672,64 @@ async function renderExpensesTab(el){
     };
   });
 }
-
-// ---------------- 我的記帳（個人，可選公開） ----------------
+// ---------------- 現金錢包（只有自己看得到，記錄帶了多少現金、還剩多少） ----------------
+function cashWalletCollectionRef(){
+  return db.collection('trips').doc(currentTrip.id).collection('cashWallets').doc(currentUser.uid);
+}
+// 把一筆花費（已知它換算成新台幣是多少）反推回「現金錢包幣別」該扣多少單位。
+// 做法：花費先換算成台幣（沿用 toTWD），再用現金錢包自己的匯率把台幣換回錢包幣別的單位數。
+function convertToWalletUnits(amountTWD, wallet){
+  if(!wallet) return 0;
+  if(wallet.currency === 'TWD') return amountTWD;
+  const rate = Number(wallet.exchangeRate);
+  if(!rate || rate<=0) return 0;
+  return amountTWD / rate;
+}
+function cashWalletCardHTML(wallet){
+  if(!wallet){
+    return `
+      <div class="card" style="border-left:4px solid var(--matcha);">
+        <h2>💵 現金餘額</h2>
+        <p class="subtitle" style="margin-bottom:12px;">記錄你這趟帶了多少現金，之後記帳時可以勾選「用現金支付」直接從這裡扣款，方便掌握身上現金還剩多少</p>
+        <form id="setCashForm">
+          <div class="field-row">
+            <div class="field" style="flex:2"><label>帶了多少現金</label><input type="number" id="cashAmount" min="0" step="0.01" required></div>
+            <div class="field"><label>幣別</label>${currencySelectHTML('JPY','', 'id="cashCurrency"')}</div>
+          </div>
+          <div class="field hidden" id="cashOtherCurrencyField"><label>幣別名稱</label><input type="text" id="cashOtherCurrency" placeholder="例如：越南盾（現金）" maxlength="20"></div>
+          <div class="field">
+            <label>匯率（1 單位 = ? 台幣）</label>
+            <div style="display:flex;gap:6px;">
+              <input type="number" id="cashRate" min="0" step="0.0001" placeholder="1" style="flex:1;">
+              <button type="button" class="btn btn-outline" id="cashRateLiveBtn" style="flex-shrink:0;padding:8px 12px;font-size:12.5px;white-space:nowrap;">抓即時匯率</button>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-accent btn-block">設定現金餘額</button>
+        </form>
+      </div>
+    `;
+  }
+  const twdEquivalent = toTWD(wallet.amount, wallet.currency, wallet.exchangeRate);
+  return `
+    <div class="card" style="border-left:4px solid var(--matcha);">
+      <div class="card-row" style="align-items:flex-start;">
+        <div>
+          <h2 style="margin-bottom:2px;">💵 現金餘額</h2>
+          <p class="subtitle" style="margin-bottom:0;">身上還剩多少現金可以花</p>
+        </div>
+        <button type="button" class="btn-danger" id="resetCashBtn" style="flex-shrink:0;">重新設定</button>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:26px;font-weight:700;color:${wallet.amount<=0?'var(--danger)':'var(--matcha)'};margin:10px 0 2px;">
+        ${fmtCurrency(wallet.amount, wallet.currency, wallet.customCurrencyName)}
+      </div>
+      ${wallet.currency!=='TWD' ? `<div class="subtitle" style="margin-bottom:12px;">≈ NT$${fmt(twdEquivalent)}</div>` : `<div style="margin-bottom:12px;"></div>`}
+      <form id="addCashForm" style="display:flex;gap:8px;">
+        <input type="number" id="addCashAmount" min="0.01" step="0.01" placeholder="再加值多少現金" style="flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required>
+        <button type="submit" class="btn btn-outline" style="flex-shrink:0;">加值</button>
+      </form>
+    </div>
+  `;
+}
 async function renderPersonalTab(el){
   const cacheKey = tabCacheKey('personal');
   let myRecords, othersData;
@@ -3692,7 +3748,17 @@ async function renderPersonalTab(el){
     tabDataCache[cacheKey] = {myRecords, othersData};
   }
 
+  // 現金餘額每次都重新抓最新的，不放進 tabDataCache 快取，避免加值/扣款後畫面顯示舊金額
+  let wallet = null;
+  try{
+    const walletSnap = await cashWalletCollectionRef().get();
+    wallet = walletSnap.exists ? walletSnap.data() : null;
+  }catch(err){
+    wallet = null;
+  }
+
   el.innerHTML = `
+    ${cashWalletCardHTML(wallet)}
     <div class="card">
       <h2>新增一筆記帳</h2>
       <form id="addRecordForm">
@@ -3712,7 +3778,8 @@ async function renderPersonalTab(el){
         </div>
         <div class="field hidden" id="recOtherCurrencyField"><label>幣別名稱</label><input type="text" id="recOtherCurrency" placeholder="例如：越南盾（現金）、點數…" maxlength="20"></div>
         <div class="field"><label>日期</label><div class="date-wrap"><input type="date" id="recDate" required></div></div>
-        <label class="checkbox-row" style="margin-bottom:14px"><input type="checkbox" id="recPublic"> 公開這筆給其他團員看到</label>
+        <label class="checkbox-row"><input type="checkbox" id="recPublic"> 公開這筆給其他團員看到</label>
+        ${wallet ? `<label class="checkbox-row" style="margin-bottom:14px;"><input type="checkbox" id="recPayCash"> 💵 這筆用現金支付（會從上面的現金餘額扣除）</label>` : ''}
         <button type="submit" class="btn btn-accent btn-block">新增記錄</button>
       </form>
     </div>
@@ -3724,7 +3791,7 @@ async function renderPersonalTab(el){
         ${myRecords.length===0 ? `<div class="empty-state">還沒有任何記帳</div>` : myRecords.map(r=>`
           <div class="record-row">
             <div>
-              <div>${esc(r.title)}<span class="visibility-badge ${r.isPublic?'public':'private'}">${r.isPublic?'公開':'只有我看得到'}</span></div>
+              <div>${esc(r.title)}<span class="visibility-badge ${r.isPublic?'public':'private'}">${r.isPublic?'公開':'只有我看得到'}</span>${r.paidWithCash ? `<span class="visibility-badge" style="background:#FFF3E6;color:var(--vermillion);">💵 現金</span>` : ''}</div>
               <div class="record-meta">${r.date}</div>
             </div>
             <div style="text-align:right">
@@ -3744,6 +3811,77 @@ async function renderPersonalTab(el){
       <div id="othersRecordList"><div class="empty-state">載入中…</div></div>
     </div>
   `;
+
+  // ---- 現金餘額卡片的事件綁定 ----
+  const cashCurrencyEl = document.getElementById('cashCurrency');
+  if(cashCurrencyEl){
+    const cashRateEl = document.getElementById('cashRate');
+    const cashOtherFieldEl = document.getElementById('cashOtherCurrencyField');
+    const cashOtherInputEl = document.getElementById('cashOtherCurrency');
+    cashCurrencyEl.onchange = ()=>{
+      const isTWD = cashCurrencyEl.value === 'TWD';
+      const isOther = cashCurrencyEl.value === 'OTHER';
+      cashRateEl.disabled = isTWD;
+      if(isTWD) cashRateEl.value = '';
+      cashOtherFieldEl.classList.toggle('hidden', !isOther);
+      if(!isOther) cashOtherInputEl.value = '';
+    };
+    document.getElementById('cashRateLiveBtn').onclick = ()=>fillLiveRate(cashCurrencyEl, cashRateEl, document.getElementById('cashRateLiveBtn'));
+    document.getElementById('setCashForm').onsubmit = async (e)=>{
+      e.preventDefault();
+      const amount = Number(document.getElementById('cashAmount').value);
+      const currency = cashCurrencyEl.value;
+      const exchangeRate = currency==='TWD' ? 1 : Number(cashRateEl.value);
+      if(!amount || amount<0){ alert('請輸入正確的金額'); return; }
+      if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
+      const customCurrencyName = cashOtherInputEl.value.trim();
+      if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      try{
+        await cashWalletCollectionRef().set({
+          amount, currency, exchangeRate, customCurrencyName,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        renderPersonalTab(el);
+      }catch(err){
+        alert('設定失敗，請檢查網路連線：'+err.message);
+        submitBtn.disabled = false;
+      }
+    };
+  }
+  const resetCashBtn = document.getElementById('resetCashBtn');
+  if(resetCashBtn){
+    resetCashBtn.onclick = async ()=>{
+      if(!confirm('確定要清除目前的現金設定，重新輸入嗎？（過去的記帳紀錄不會被刪除）')) return;
+      try{
+        await cashWalletCollectionRef().delete();
+        renderPersonalTab(el);
+      }catch(err){
+        alert('操作失敗，請檢查網路連線：'+err.message);
+      }
+    };
+  }
+  const addCashForm = document.getElementById('addCashForm');
+  if(addCashForm){
+    addCashForm.onsubmit = async (e)=>{
+      e.preventDefault();
+      const addAmount = Number(document.getElementById('addCashAmount').value);
+      if(!addAmount || addAmount<=0){ alert('請輸入正確的金額'); return; }
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      try{
+        await cashWalletCollectionRef().update({
+          amount: (wallet.amount||0) + addAmount,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        renderPersonalTab(el);
+      }catch(err){
+        alert('加值失敗，請檢查網路連線：'+err.message);
+        submitBtn.disabled = false;
+      }
+    };
+  }
 
   document.getElementById('recDate').value = todayStr();
 
@@ -3768,16 +3906,46 @@ async function renderPersonalTab(el){
     if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
     const customCurrencyName = recOtherInputEl.value.trim();
     if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
-    await db.collection('trips').doc(currentTrip.id).collection('personalRecords').add({
+
+    const amount = Number(document.getElementById('recAmount').value);
+    const recordData = {
       title: document.getElementById('recTitle').value.trim(),
-      amount: Number(document.getElementById('recAmount').value),
-      currency, exchangeRate, customCurrencyName,
+      amount, currency, exchangeRate, customCurrencyName,
       date: document.getElementById('recDate').value,
       isPublic: document.getElementById('recPublic').checked,
       userId: currentUser.uid
-    });
-    clearTabCache('personal');
-    renderPersonalTab(el);
+    };
+
+    const payCashEl = document.getElementById('recPayCash');
+    const payCash = wallet && payCashEl && payCashEl.checked;
+    let cashDeductedAmount = 0;
+    if(payCash){
+      const amountTWD = toTWD(amount, currency, exchangeRate);
+      cashDeductedAmount = convertToWalletUnits(amountTWD, wallet);
+      if(!cashDeductedAmount || cashDeductedAmount<=0){
+        alert('現金餘額的匯率設定有問題，請先到上面「重新設定」現金餘額');
+        return;
+      }
+      recordData.paidWithCash = true;
+      recordData.cashDeductedAmount = cashDeductedAmount;
+    }
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try{
+      await db.collection('trips').doc(currentTrip.id).collection('personalRecords').add(recordData);
+      if(payCash){
+        await cashWalletCollectionRef().update({
+          amount: (wallet.amount||0) - cashDeductedAmount,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      clearTabCache('personal');
+      renderPersonalTab(el);
+    }catch(err){
+      alert('新增失敗，請檢查網路連線：'+err.message);
+      submitBtn.disabled = false;
+    }
   };
 
   el.querySelectorAll('[data-toggle-record]').forEach(btn=>{
@@ -3790,9 +3958,25 @@ async function renderPersonalTab(el){
   });
   el.querySelectorAll('[data-del-record]').forEach(btn=>{
     btn.onclick = async ()=>{
-      await db.collection('trips').doc(currentTrip.id).collection('personalRecords').doc(btn.dataset.delRecord).delete();
-      clearTabCache('personal');
-      renderPersonalTab(el);
+      const record = myRecords.find(r=>r.id===btn.dataset.delRecord);
+      try{
+        await db.collection('trips').doc(currentTrip.id).collection('personalRecords').doc(btn.dataset.delRecord).delete();
+        // 這筆原本是用現金付的，刪除時把扣掉的金額退回現金餘額
+        if(record && record.paidWithCash && record.cashDeductedAmount){
+          const walletSnap = await cashWalletCollectionRef().get();
+          if(walletSnap.exists){
+            const currentWallet = walletSnap.data();
+            await cashWalletCollectionRef().update({
+              amount: (currentWallet.amount||0) + record.cashDeductedAmount,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          }
+        }
+        clearTabCache('personal');
+        renderPersonalTab(el);
+      }catch(err){
+        alert('刪除失敗，請檢查網路連線：'+err.message);
+      }
     };
   });
 
