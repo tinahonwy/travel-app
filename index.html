@@ -3010,33 +3010,74 @@ async function renderPostsTab(el){
     }
   }
   el.innerHTML = `
-    <div id="packingSection"></div>
-    <div class="card">
-      <h2>✏️ 發表新貼文</h2>
-      <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
-      <form id="addPostForm">
-        <div class="field">
-        <div class="format-toolbar">
-        <button type="button" class="format-btn format-btn-bold" data-fmt="bold" title="粗體">B 粗體</button>
-        <button type="button" class="format-btn format-btn-highlight" data-fmt="highlight" title="螢光筆重點">🖍️ 螢光筆</button>
-        <button type="button" class="format-btn format-btn-warn" data-fmt="warn" title="紅字強調">🔴 紅字</button>
-        <button type="button" class="format-btn format-btn-big" data-fmt="big" title="放大字體">A+ 放大</button>
-        <button type="button" class="format-btn format-btn-small" data-fmt="small" title="縮小字體">A- 縮小</button>
-        </div>
-        <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;"></textarea>
-        <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案。選取文字後按上面的按鈕可以畫重點</p>
-        </div>
-        <div class="field">
-          <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填，可多選）<input type="file" id="postImageInput" accept="image/*" multiple style="display:none"></label>
-          <div id="postImageList" class="post-e-img-list" style="margin-top:10px;"></div>
-        </div>
-        <button type="submit" class="btn btn-accent btn-block">發布</button>
-      </form>
+    <div class="collapsible-section">
+      <h2 class="collapsible-header" data-toggle="packing" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:0 0 0;border-bottom:1px solid var(--border);">
+        <span>🎒 我的打包清單</span>
+        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+      </h2>
+      <div class="collapsible-content" id="packingContent" style="display:none;padding:0;">
+        <div id="packingSection" style="margin-top:16px;"></div>
+      </div>
     </div>
-    <div id="postsList">
-      ${posts.length===0 ? `<div class="empty-state">還沒有人發文，來寫第一篇攻略吧</div>` : posts.map(postCardHTML).join('')}
+    <div class="collapsible-section">
+      <h2 class="collapsible-header" data-toggle="newpost" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:20px 0 0;border-bottom:1px solid var(--border);">
+        <span>✏️ 發表新貼文</span>
+        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+      </h2>
+      <div class="collapsible-content" id="newpostContent" style="display:none;padding:0;">
+        <div class="card" style="border:none;padding:16px 0 0 0;margin:0;background:transparent;">
+          <p class="subtitle" style="margin-bottom:12px">分享景點攻略、心得、注意事項⋯⋯大家都看得到</p>
+          <form id="addPostForm">
+            <div class="field">
+            <div class="format-toolbar">
+            <button type="button" class="format-btn format-btn-bold" data-fmt="bold" title="粗體">B 粗體</button>
+            <button type="button" class="format-btn format-btn-highlight" data-fmt="highlight" title="螢光筆重點">🖍️ 螢光筆</button>
+            <button type="button" class="format-btn format-btn-warn" data-fmt="warn" title="紅字強調">🔴 紅字</button>
+            <button type="button" class="format-btn format-btn-big" data-fmt="big" title="放大字體">A+ 放大</button>
+            <button type="button" class="format-btn format-btn-small" data-fmt="small" title="縮小字體">A- 縮小</button>
+            </div>
+            <textarea id="postText" rows="8" placeholder="想跟大家分享什麼？也可以直接 Ctrl+V／⌘+V 貼上截圖" style="width:100%;min-width:0;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);resize:vertical;font-family:var(--font-body);line-height:1.6;"></textarea>
+            <p class="subtitle" style="margin:6px 0 0;font-size:12px;">📋 截圖或複製的圖片可以直接在上面按 Ctrl+V／⌘+V 貼上，不用另外存成檔案。選取文字後按上面的按鈕可以畫重點</p>
+            </div>
+            <div class="field">
+              <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 加照片（選填，可多選）<input type="file" id="postImageInput" accept="image/*" multiple style="display:none"></label>
+              <div id="postImageList" class="post-e-img-list" style="margin-top:10px;"></div>
+            </div>
+            <button type="submit" class="btn btn-accent btn-block">發布</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="collapsible-section">
+      <h2 class="collapsible-header" data-toggle="posts" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:20px 0 0;border-bottom:1px solid var(--border);">
+        <span>📝 貼文們</span>
+        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+      </h2>
+      <div class="collapsible-content" id="postsContent" style="display:none;padding:0;">
+        <div id="postsList" style="margin-top:16px;">
+          ${posts.length===0 ? `<div class="empty-state">還沒有人發文，來寫第一篇攻略吧</div>` : posts.map(postCardHTML).join('')}
+        </div>
+      </div>
     </div>
   `;
+
+  // 綁定展開/收起事件
+  el.querySelectorAll('.collapsible-header').forEach(header=>{
+    header.onclick = ()=>{
+      const section = header.closest('.collapsible-section');
+      const content = section.querySelector('.collapsible-content');
+      const icon = header.querySelector('.collapsible-icon');
+      const isOpen = content.style.display !== 'none';
+      
+      if(isOpen){
+        content.style.display = 'none';
+        icon.textContent = '▶';
+      } else {
+        content.style.display = 'block';
+        icon.textContent = '▼';
+      }
+    };
+  });
 
     renderPackingSection(document.getElementById('packingSection'));
     bindFormatToolbar(document.getElementById('addPostForm'), document.getElementById('postText'));
