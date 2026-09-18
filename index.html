@@ -2127,8 +2127,8 @@ async function renderItineraryTab(el){
       <div class="day-header" data-day-view="${d.id}">
         <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
         <div style="display:flex;gap:6px;">
-          <button class="item-btn item-btn-edit" data-day-edit="${d.id}">編輯</button>
-          <button class="item-btn item-btn-del" data-del-day="${d.id}">刪除整天</button>
+          ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-edit" data-day-edit="${d.id}">編輯</button>` : ''}
+          ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-del" data-del-day="${d.id}">刪除整天</button>` : ''}
         </div>
       </div>
       <div class="edit-item-form hidden" data-day-edit-form="${d.id}">
@@ -2142,7 +2142,7 @@ async function renderItineraryTab(el){
         </div>
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
-      <button type="button" class="btn btn-outline btn-block toggle-add-item" data-day-id="${d.id}" style="margin-top:12px">＋ 新增行程項目</button>
+      ${isMe(currentTrip.ownerId) ? `<button type="button" class="btn btn-outline btn-block toggle-add-item" data-day-id="${d.id}" style="margin-top:12px">＋ 新增行程項目</button>` : ''}
       <form class="add-item-form hidden" data-add-item-for="${d.id}" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
         <div class="field-row">
           <div class="field" style="flex:0 0 96px">
@@ -2285,8 +2285,8 @@ function itineraryItemRowHTML(it){
         ${itemPrivateTagHTML(it)}
       </div>
       <div class="item-actions">
-        <button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>
-        <button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>
+        ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>` : ''}
+        ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>` : ''}
       </div>
     </div>
   `;
@@ -4074,10 +4074,8 @@ async function renderMembersTab(el){
     <div class="card">
       <h2>離開這趟旅行</h2>
       ${isOwner
-        ? (currentMembers.length>1
-            ? `<p class="subtitle" style="margin-bottom:0">你是發起人，請先把「發起人」身份轉移給其他團員，才能退出這個團。</p>`
-            : `<p class="subtitle" style="margin-bottom:12px">目前只有你一個人在這個行程裡，退出等於刪除整個行程，且無法復原。</p>
-               <button class="btn btn-outline btn-block" id="deleteTripBtn" style="border-color:var(--danger);color:var(--danger);">刪除這個行程</button>`)
+        ? `<p class="subtitle" style="margin-bottom:12px">作為發起人，你可以隨時刪除這個行程。刪除後所有資料都將無法復原。</p>
+           <button class="btn btn-outline btn-block" id="deleteTripBtn" style="border-color:var(--danger);color:var(--danger);">刪除這個行程</button>`
         : `<p class="subtitle" style="margin-bottom:12px">退出後就看不到這個行程了，其他團員的資料不會受影響。</p>
            <button class="btn btn-outline btn-block" id="leaveTripBtn" style="border-color:var(--danger);color:var(--danger);">退出這個團</button>`
       }
