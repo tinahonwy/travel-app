@@ -3353,11 +3353,44 @@ async function renderMoneyTab(el){
       <h2 style="margin-bottom:4px;">💰 金錢管理</h2>
       <p class="subtitle" style="margin-bottom:0;">這裡整合了「大家一起分攤的花費」跟「你自己的消費記帳」。</p>
     </div>
-    <h2 style="margin:20px 0 10px;">🤝 一起出錢</h2>
-    <div id="moneySharedSection"></div>
-    <h2 style="margin:28px 0 10px;">📝 我的記帳</h2>
-    <div id="moneyPersonalSection"></div>
+    <div class="collapsible-section">
+      <h2 class="collapsible-header" data-toggle="expenses" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:20px 0 0;border-bottom:1px solid var(--border);">
+        <span>🤝 一起出錢</span>
+        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+      </h2>
+      <div class="collapsible-content" id="expensesContent" style="display:none;padding:0;">
+        <div id="moneySharedSection" style="margin-top:16px;"></div>
+      </div>
+    </div>
+    <div class="collapsible-section">
+      <h2 class="collapsible-header" data-toggle="personal" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:20px 0 0;border-bottom:1px solid var(--border);">
+        <span>📝 我的記帳</span>
+        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+      </h2>
+      <div class="collapsible-content" id="personalContent" style="display:none;padding:0;">
+        <div id="moneyPersonalSection" style="margin-top:16px;"></div>
+      </div>
+    </div>
   `;
+  
+  // 綁定展開/收起事件
+  el.querySelectorAll('.collapsible-header').forEach(header=>{
+    header.onclick = ()=>{
+      const section = header.closest('.collapsible-section');
+      const content = section.querySelector('.collapsible-content');
+      const icon = header.querySelector('.collapsible-icon');
+      const isOpen = content.style.display !== 'none';
+      
+      if(isOpen){
+        content.style.display = 'none';
+        icon.textContent = '▶';
+      } else {
+        content.style.display = 'block';
+        icon.textContent = '▼';
+      }
+    };
+  });
+  
   await renderExpensesTab(document.getElementById('moneySharedSection'));
   await renderPersonalTab(document.getElementById('moneyPersonalSection'));
 }
