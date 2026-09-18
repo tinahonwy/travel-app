@@ -4074,8 +4074,10 @@ async function renderMembersTab(el){
     <div class="card">
       <h2>離開這趟旅行</h2>
       ${isOwner
-        ? `<p class="subtitle" style="margin-bottom:12px">作為發起人，你可以隨時刪除這個行程。刪除後所有資料都將無法復原。</p>
-           <button class="btn btn-outline btn-block" id="deleteTripBtn" style="border-color:var(--danger);color:var(--danger);">刪除這個行程</button>`
+        ? (currentMembers.length>1
+            ? `<p class="subtitle" style="margin-bottom:0">請先移除其他團員，才能刪除這個行程。</p>`
+            : `<p class="subtitle" style="margin-bottom:12px">目前只有你一個人在這個行程裡，你可以刪除這個行程。</p>
+               <button class="btn btn-outline btn-block" id="deleteTripBtn" style="border-color:var(--danger);color:var(--danger);">刪除這個行程</button>`)
         : `<p class="subtitle" style="margin-bottom:12px">退出後就看不到這個行程了，其他團員的資料不會受影響。</p>
            <button class="btn btn-outline btn-block" id="leaveTripBtn" style="border-color:var(--danger);color:var(--danger);">退出這個團</button>`
       }
