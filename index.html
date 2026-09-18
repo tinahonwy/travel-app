@@ -2134,7 +2134,7 @@ async function renderItineraryTab(el){
       <div class="edit-item-form hidden" data-day-edit-form="${d.id}">
         <div class="field-row">
           <div class="field" style="flex:0 0 150px"><label>日期</label><div class="date-wrap"><input type="date" class="day-e-date" value="${d.date}" required></div></div>
-          <div class="field" style="flex:2"><label>標題</label><input type="text" class="day-e-title" value="${esc(d.title)}" required></div>
+          <div class="field" style="flex:2"><label>標題</label><input type="text" class="day-e-title" value="${esc(d.title)}" maxlength="30" required></div>
         </div>
         <div style="display:flex;gap:8px">
           <button type="button" class="btn btn-accent day-e-save" style="flex:1">儲存</button>
@@ -2155,7 +2155,7 @@ async function renderItineraryTab(el){
           </div>
           <div class="field" style="flex:1 1 180px">
             <label>要去哪裡／做什麼</label>
-            <input type="text" class="i-title" placeholder="例如：道頓堀逛街" required>
+            <input type="text" class="i-title" placeholder="例如：道頓堀逛街" maxlength="20" required>
           </div>
         </div>
         <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
@@ -2348,7 +2348,7 @@ async function renderItemsFor(dayId){
           <div class="field-row">
             <div class="field" style="flex:0 0 96px"><label>時</label><select class="it-hour">${hourOptionsHTML().replace(`value="${h}"`, `value="${h}" selected`)}</select></div>
             <div class="field" style="flex:0 0 96px"><label>分</label><select class="it-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
-            <div class="field" style="flex:1 1 180px"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" required></div>
+            <div class="field" style="flex:1 1 180px"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" maxlength="20" required></div>
           </div>
           <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
           <div class="field-row">
