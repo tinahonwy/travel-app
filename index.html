@@ -3051,9 +3051,9 @@ async function renderPostsTab(el){
     <div class="collapsible-section">
       <h2 class="collapsible-header" data-toggle="posts" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:20px 0 0;border-bottom:1px solid var(--border);">
         <span>📝 貼文們</span>
-        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+        <span class="collapsible-icon" style="font-size:18px;visibility:hidden;">▼</span>
       </h2>
-      <div class="collapsible-content" id="postsContent" style="display:none;padding:0;">
+      <div class="collapsible-content" id="postsContent" style="display:block;padding:0;">
         <div id="postsList" style="margin-top:16px;">
           ${posts.length===0 ? `<div class="empty-state">還沒有人發文，來寫第一篇攻略吧</div>` : posts.map(postCardHTML).join('')}
         </div>
