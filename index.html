@@ -576,6 +576,27 @@ function suggestNextDayDate(days){
   return todayStr();
 }
 function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+// 共用圖片壓縮：回傳 JPEG dataURL
+function compressImageToDataURL(file, maxW, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = ()=>{
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale;
+        canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 function weekdayLabel(dateStr){
   if(!dateStr) return '';
@@ -644,10 +665,7 @@ function readPrivateFields(scopeEl, prefix){
 }
 function itemPrivateTagHTML(item){
   if(item.visibility !== 'private') return '';
-  // 修正重點：以前這裡把「你」寫死等於「建立者本人」，導致別人（例如你朋友）
-  // 用自己的帳號建立這筆私人行程時，你登入後看到的還是「你、對方名字」，
-  // 完全沒有依照『目前登入的是誰』重新判斷。
-  // 修法：可以看到這筆的人＝建立者(authorUid) + visibleTo 名單，
+  // 可以看到這筆的人＝建立者(authorUid) + visibleTo 名單，
   // 對每一個 uid 都用 isMe() 動態判斷是不是「你」，而不是假設建立者=你。
   const authorUid = item.authorUid;
   const visibleTo = item.visibleTo || [];
@@ -679,9 +697,13 @@ const CURRENCIES = [
   {code:'VND', name:'越南盾', symbol:'₫'}
 ];
 function currencyOf(code){ return CURRENCIES.find(c=>c.code===code) || CURRENCIES[0]; }
-function currencySelectHTML(selectedCode, extraClass, extraAttrs){
-  const sel = selectedCode || 'TWD';
-  return `<select class="${extraClass||''}" ${extraAttrs||''}>${CURRENCIES.map(c=>
+// placeholder：有傳的話允許「還沒選」的空白狀態（匯率小工具使用）；沒傳就維持原本預設台幣的行為
+function currencySelectHTML(selectedCode, extraClass, extraAttrs, placeholder){
+  const sel = placeholder ? (selectedCode || '') : (selectedCode || 'TWD');
+  const placeholderOpt = placeholder
+    ? `<option value="" disabled ${sel===''?'selected':''}>${esc(placeholder)}</option>`
+    : '';
+  return `<select class="${extraClass||''}" ${extraAttrs||''}>${placeholderOpt}${CURRENCIES.map(c=>
     `<option value="${c.code}" ${c.code===sel?'selected':''}>${c.name}（${c.code}）</option>`
   ).join('')}<option value="OTHER" ${sel==='OTHER'?'selected':''}>其他</option></select>`;
 }
@@ -1964,17 +1986,33 @@ function safeEval(exprRaw){
   if(!isFinite(result)) throw new Error('計算錯誤');
   return result;
 }
+// 匯率小工具的偏好設定：每個行程、每個使用者各自記住上次選的幣別與換算方向
+function ctPrefsKey(){
+  return (currentUser && currentTrip) ? 'travelApp.ctPrefs.' + currentTrip.id + '.' + currentUser.uid : null;
+}
+function loadCtPrefs(){
+  const key = ctPrefsKey();
+  if(!key) return {};
+  try{ return JSON.parse(localStorage.getItem(key)) || {}; }catch(e){ return {}; }
+}
+function saveCtPrefs(prefs){
+  const key = ctPrefsKey();
+  if(!key) return;
+  try{ localStorage.setItem(key, JSON.stringify(prefs)); }catch(e){}
+}
 function currencyToolCardHTML(){
+  const prefs = loadCtPrefs();
+  const dir = prefs.direction === 'toForeign' ? 'toForeign' : 'toTWD';
   return `
     <div class="card" id="currencyToolCard">
       <h2>💱 匯率換算小工具</h2>
       <div class="field" style="display:flex;gap:8px;align-items:stretch;">
-        <div style="flex:1;min-width:0;">${currencySelectHTML('JPY','', 'id="ctCurrency"')}</div>
+        <div style="flex:1;min-width:0;">${currencySelectHTML(prefs.currency || '','', 'id="ctCurrency"', '請選擇幣別')}</div>
         <button type="button" class="btn btn-outline" id="ctRefreshRateBtn" style="flex-shrink:0;padding:8px 13px;font-size:12.5px;white-space:nowrap;">🔄 即時匯率</button>
       </div>
       <div style="display:flex;gap:16px;margin:2px 0 10px;font-size:13px;color:var(--ink-soft);flex-wrap:wrap;">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toTWD" checked> 外幣 → 台幣</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toForeign"> 台幣 → 外幣</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toTWD" ${dir==='toTWD'?'checked':''}> 外幣 → 台幣</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="ctDirection" value="toForeign" ${dir==='toForeign'?'checked':''}> 台幣 → 外幣</label>
       </div>
       <div class="ct-display" id="ctDisplay">0</div>
       <div id="ctResult" style="font-size:15px;font-weight:600;margin:8px 0 4px;">載入匯率中…</div>
@@ -2011,18 +2049,19 @@ function bindCurrencyTool(scopeEl){
   const resultEl = card.querySelector('#ctResult');
   const metaEl = card.querySelector('#ctMeta');
   const refreshBtn = card.querySelector('#ctRefreshRateBtn');
-  let expr = ' ';
+  let expr = '';
 
   function renderDisplay(){
     displayEl.textContent = expr === '' ? '0' : expr;
   }
 
   async function update(forceRefresh=false){
-    resultEl.textContent = forceRefresh ? '正在搜尋最新匯率…' : '載入匯率中…';
+    const code = currencyEl.value;
     metaEl.textContent = '';
+    if(!code){ resultEl.textContent = '請先選擇要換算的幣別'; return; }
+    resultEl.textContent = forceRefresh ? '正在搜尋最新匯率…' : '載入匯率中…';
     try{
       const rates = await fetchRates(forceRefresh);
-      const code = currencyEl.value;
       const direction = card.querySelector('input[name="ctDirection"]:checked').value;
       if(code==='OTHER'){ resultEl.textContent = '這個幣別沒有即時匯率，請自行輸入'; return; }
       const rate = rates[code]; // 1 台幣 = rate[code] 個這個幣別
@@ -2058,8 +2097,17 @@ function bindCurrencyTool(scopeEl){
       update();
     };
   });
-  currencyEl.onchange = update;
-  card.querySelectorAll('input[name="ctDirection"]').forEach(r=>{ r.onchange = update; });
+  // 記住這個行程上次選的幣別與換算方向（每個行程各自獨立）
+  function persistPrefs(){
+    saveCtPrefs({
+      currency: currencyEl.value,
+      direction: card.querySelector('input[name="ctDirection"]:checked').value
+    });
+  }
+  currencyEl.onchange = ()=>{ persistPrefs(); update(); };
+  card.querySelectorAll('input[name="ctDirection"]').forEach(r=>{
+    r.onchange = ()=>{ persistPrefs(); update(); };
+  });
   if(refreshBtn){
     refreshBtn.onclick = async ()=>{
       const originalText = refreshBtn.textContent;
@@ -2742,9 +2790,6 @@ function formatPostTime(ts){
   const d = ts.toDate();
   return d.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
 }
-// 把純文字裡的網址自動轉成可以點擊的連結（先安全跳脫文字，再插入連結標籤，避免 XSS）
-// 把純文字裡的網址轉成可點擊連結，並支援簡單的畫重點標記：
-// **文字** → 粗體、==文字== → 螢光筆重點、!!文字!! → 紅字強調
 // 畫重點標記解析：**粗體**、==螢光筆==、!!紅字!!、^^放大^^、~~縮小~~，並支援自動偵測網址。
 // 用「剝洋蔥」式的遞迴解析（先抓最外層符號，內容再重新解析一次），
 // 這樣不管疊加幾種格式、用什麼順序疊加（例如粗體裡包紅字），都能正確巢狀渲染，
@@ -3097,23 +3142,7 @@ async function renderPostsTab(el){
     });
   }
   function compressImageFile(file){
-    return new Promise((resolve)=>{
-      const reader = new FileReader();
-      reader.onload = (ev)=>{
-        const img = new Image();
-        img.onload = ()=>{
-          const maxW = 900;
-          const scale = Math.min(1, maxW/img.width);
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width*scale;
-          canvas.height = img.height*scale;
-          canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-          resolve(canvas.toDataURL('image/jpeg', 0.75));
-        };
-        img.src = ev.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
+    return compressImageToDataURL(file, 900, 0.75);
   }
   function removePendingPostImage(i){
     pendingPostImages.splice(i,1);
@@ -3724,7 +3753,7 @@ async function renderExpensesTab(el){
     cb.onchange = async ()=>{
       if(!cb.checked) return;
       const fromId = cb.dataset.from, toId = cb.dataset.to, amount = Number(cb.dataset.amount);
-      if(!confirm(`確定已經收到 ${nameOf(fromId)} 付的 ¥${fmt(amount)} 了嗎？`)){
+      if(!confirm(`確定已經收到 ${nameOf(fromId)} 付的 NT$${fmt(amount)} 了嗎？`)){
         cb.checked = false;
         return;
       }
@@ -4146,6 +4175,31 @@ async function renderMembersTab(el){
       </div>
     </div>
     <div class="card">
+      <h2>🐞 回報問題</h2>
+      <p class="subtitle" style="margin-bottom:12px">遇到 bug、畫面怪怪的，或有想要的新功能，都可以寫在這裡</p>
+      <div id="bugMsgBox"></div>
+      <form id="bugReportForm">
+        <div class="field">
+          <label>類型</label>
+          <select id="bugType">
+            <option value="bug">🐞 功能壞掉</option>
+            <option value="ui">📱 畫面跑版</option>
+            <option value="idea">💡 功能建議</option>
+            <option value="other">💬 其他</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>發生什麼事？</label>
+          <textarea id="bugText" rows="5" maxlength="2000" placeholder="例如：在金錢管理按「抓即時匯率」沒有反應。也可以直接 Ctrl+V／⌘+V 貼上截圖" style="resize:vertical;line-height:1.6;"></textarea>
+        </div>
+        <div class="field">
+          <label class="btn btn-outline" style="width:auto;display:inline-flex;padding:8px 16px;font-size:13px;">📷 附上截圖（選填）<input type="file" id="bugImageInput" accept="image/*" style="display:none"></label>
+          <div id="bugImagePreview" class="post-e-img-list" style="margin-top:10px;"></div>
+        </div>
+        <button type="submit" class="btn btn-accent btn-block">送出回報</button>
+      </form>
+    </div>
+    <div class="card">
       <h2>離開這趟旅行</h2>
       ${isOwner
         ? (currentMembers.length>1
@@ -4222,6 +4276,67 @@ async function renderMembersTab(el){
       }
     };
   }
+
+  // ---- 回報問題 ----
+  let bugImage = null;
+  const bugImageInput = document.getElementById('bugImageInput');
+  const bugPreviewEl = document.getElementById('bugImagePreview');
+  function renderBugPreview(){
+    bugPreviewEl.innerHTML = bugImage ? `
+      <div class="post-e-img-thumb-wrap">
+        <img src="${bugImage}" class="post-e-img-thumb">
+        <button type="button" class="post-e-img-remove" id="bugImageRemove">✕</button>
+      </div>` : '';
+    const rm = document.getElementById('bugImageRemove');
+    if(rm) rm.onclick = ()=>{ bugImage = null; renderBugPreview(); };
+  }
+  bugImageInput.onchange = async (e)=>{
+    const file = e.target.files[0];
+    bugImageInput.value = '';
+    if(!file) return;
+    bugImage = await compressImageToDataURL(file, 1000, 0.7);
+    renderBugPreview();
+  };
+  document.getElementById('bugText').addEventListener('paste', async (e)=>{
+    const items = [...(e.clipboardData ? e.clipboardData.items : [])];
+    const imgItem = items.find(it=>it.type && it.type.startsWith('image/'));
+    if(!imgItem) return;
+    e.preventDefault();
+    const file = imgItem.getAsFile();
+    if(file){ bugImage = await compressImageToDataURL(file, 1000, 0.7); renderBugPreview(); }
+  });
+  document.getElementById('bugReportForm').onsubmit = async (e)=>{
+    e.preventDefault();
+    const text = document.getElementById('bugText').value.trim();
+    if(!text && !bugImage){ showMsg('bugMsgBox', '請描述一下問題，或附上截圖'); return; }
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; submitBtn.textContent = '送出中…';
+    try{
+      const report = {
+        type: document.getElementById('bugType').value,
+        text,
+        uid: currentUser.uid,
+        email: currentUser.email || '',
+        displayName: (currentProfile && currentProfile.displayName) || '',
+        tripId: currentTrip.id,
+        tripName: currentTrip.name || '',
+        userAgent: navigator.userAgent,
+        screen: `${window.innerWidth}x${window.innerHeight}`,
+        status: 'open',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if(bugImage) report.image = bugImage;
+      await db.collection('bugReports').add(report);
+      e.target.reset();
+      bugImage = null;
+      renderBugPreview();
+      showMsg('bugMsgBox', '已收到你的回報，謝謝！🙏', 'success');
+    }catch(err){
+      showMsg('bugMsgBox', '送出失敗：' + err.message);
+    }finally{
+      submitBtn.disabled = false; submitBtn.textContent = '送出回報';
+    }
+  };
 }
 
 // 圖片燈箱：支援單張圖片，也支援像 FB 一樣可以左右切換的多張圖片相簿
