@@ -3117,7 +3117,7 @@ async function renderPackingSection(el, opts){
     <div class="card">
       <h2>${shared ? '👥 共同打包清單' : '🎒 我的打包清單'}</h2>
       <p class="subtitle" style="margin-bottom:10px;">${shared
-        ? '全團都看得到，大家都可以新增、勾選、刪除，適合共用的東西（例如：吹風機、轉接頭、常備藥）'
+        ? '清單全團共用，大家都可以新增、刪除項目。打勾只記錄「你自己」有沒有帶，不會影響別人的畫面（例如：吹風機、轉接頭、常備藥）'
         : '只有你自己看得到，勾選代表已經帶了，可以自訂分類'}</p>
       <div class="pack-progress pk-progress"></div>
       <div class="pk-list"><div class="empty-state" style="padding:14px 0;">載入中…</div></div>
@@ -3136,6 +3136,11 @@ async function renderPackingSection(el, opts){
     </div>
   `;
   const q = (sel)=>el.querySelector(sel);
+  // 共同清單：每個人各自有自己的勾選（存在 packedBy 裡，以 uid 為 key）；
+  // 我的清單：維持原本的單一 packed
+  const isPacked = (it)=> shared
+    ? !!(it.packedBy && it.packedBy[currentUser.uid])
+    : !!it.packed;
 
   const itemsCacheKey = tabCacheKey(cacheName);
   const catCacheKey = tabCacheKey(cacheName + 'Categories');
@@ -3210,7 +3215,7 @@ async function renderPackingSection(el, opts){
     const listEl = q('.pk-list');
     const progressEl = q('.pk-progress');
     if(!listEl) return;
-    const packedCount = items.filter(it=>it.packed).length;
+    const packedCount = items.filter(isPacked).length;
     progressEl.textContent = items.length===0 ? '' : `已打包 ${packedCount} / ${items.length} 項`;
     if(items.length===0){
       listEl.innerHTML = loadError
@@ -3228,7 +3233,7 @@ async function renderPackingSection(el, opts){
     });
     listEl.innerHTML = order.filter(c=>grouped[c] && grouped[c].length>0).map(cat=>{
       const catItems = grouped[cat];
-      const packedInCat = catItems.filter(it=>it.packed).length;
+      const packedInCat = catItems.filter(isPacked).length;
       const color = categoryColor(cat);
       return `
         <div class="pack-category-block" data-pack-cat="${esc(cat)}">
@@ -3237,13 +3242,16 @@ async function renderPackingSection(el, opts){
             <span class="pack-category-count">${packedInCat} / ${catItems.length}</span>
           </div>
           ${catItems.map(it=>{
-            // 共同清單：標示是誰加的、誰已經帶了
-            const by = shared
-              ? (it.packed && it.packedByName ? `✓ ${esc(it.packedByName)} 已帶` : (it.addedByName ? `${esc(it.addedByName)} 加入` : ''))
-              : '';
+            // 共同清單：標示是誰加的，以及「其他團員」誰已經帶了（自己的勾選直接看打勾框）
+            let by = '';
+            if(shared){
+              const others = Object.keys(it.packedBy || {}).filter(uid => it.packedBy[uid] && !isMe(uid)).map(nameOf);
+              by = [it.addedByName ? `${esc(it.addedByName)} 加入` : '', others.length ? `✓ ${others.map(esc).join('、')} 已帶` : ''].filter(Boolean).join(' · ');
+            }
+            const packedNow = isPacked(it);
             return `
-            <div class="pack-row pack-row-colored ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}" style="border-left-color:${color.bg};">
-              <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" style="accent-color:${color.text};" ${it.packed?'checked':''}>
+            <div class="pack-row pack-row-colored ${packedNow ? 'packed' : ''}" data-pack-row="${it.id}" style="border-left-color:${color.bg};">
+              <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" style="accent-color:${color.text};" ${packedNow?'checked':''}>
               <span class="pack-item-name">${esc(it.name)}${by ? `<span class="pack-by">${by}</span>` : ''}</span>
               <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
             </div>`;
@@ -3256,17 +3264,31 @@ async function renderPackingSection(el, opts){
         const id = cb.dataset.packToggle;
         const item = items.find(x=>x.id===id);
         if(!item) return;
-        item.packed = cb.checked;
-        if(shared){ item.packedByName = item.packed ? myName() : null; }
+        const nowPacked = cb.checked;
+        const uid = currentUser.uid;
+        // 先更新畫面，失敗再復原
+        if(shared){
+          item.packedBy = item.packedBy || {};
+          if(nowPacked) item.packedBy[uid] = true; else delete item.packedBy[uid];
+        }else{
+          item.packed = nowPacked;
+        }
         renderList();
         try{
-          const data = { packed: item.packed };
           if(shared){
-            data.packedByName = item.packed ? myName() : firebase.firestore.FieldValue.delete();
+            // 只寫入「自己的那一格」，兩個人同時勾不同人的格子不會互相蓋掉
+            await collectionRef.doc(id).update({
+              ['packedBy.' + uid]: nowPacked ? true : firebase.firestore.FieldValue.delete()
+            });
+          }else{
+            await collectionRef.doc(id).update({ packed: nowPacked });
           }
-          await collectionRef.doc(id).update(data);
         }catch(err){
-          item.packed = !item.packed;
+          if(shared){
+            if(nowPacked) delete item.packedBy[uid]; else item.packedBy[uid] = true;
+          }else{
+            item.packed = !nowPacked;
+          }
           renderList();
           alert('更新失敗，請檢查網路連線：'+err.message);
         }
@@ -3316,7 +3338,7 @@ async function renderPackingSection(el, opts){
         name, category, packed:false, userId: currentUser.uid,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
-      if(shared) newItem.addedByName = myName();
+      if(shared){ newItem.addedByName = myName(); newItem.packedBy = {}; }
       const ref = await collectionRef.add(newItem);
       items.push({id:ref.id, ...newItem, createdAt:{toDate:()=>new Date()}});
       tabDataCache[itemsCacheKey] = items;
