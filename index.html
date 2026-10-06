@@ -251,6 +251,7 @@ body.app-offline .ann-dont-show input{opacity:1; pointer-events:auto;}
   .pack-check{width:20px;height:20px;accent-color:var(--matcha);cursor:pointer;flex-shrink:0;}
   .pack-item-name{flex:1;min-width:0;word-break:break-word;font-size:13.5px;}
   .pack-progress{font-size:12px;color:var(--muted);margin-bottom:10px;}
+  .pack-by{display:block;font-size:11px;color:var(--muted);margin-top:1px;}
   .pack-category-block{margin-bottom:16px;}
   .pack-category-block:last-child{margin-bottom:0;}
   .pack-category-title{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;font-weight:700;padding:5px 10px;border-radius:6px;margin-bottom:2px;}
@@ -311,6 +312,13 @@ let announcementChecked = false; // 這次開啟網頁（登入後）是否已�
 const tabDataCache = {}; // avoids refetching from Firestore every time you switch tabs
 function tabCacheKey(name, extra){ return currentTrip.id + '|' + name + (extra?('|'+extra):''); }
 function clearTabCache(name, extra){ delete tabDataCache[tabCacheKey(name, extra)]; }
+// 清掉目前這個行程的所有分頁快取：切換分頁或按「更新」時使用，
+// 這樣其他團員剛新增／修改的行程、貼文、打包清單才會顯示出來
+function clearAllTripCache(){
+  if(!currentTrip) return;
+  const prefix = currentTrip.id + '|';
+  Object.keys(tabDataCache).forEach(k=>{ if(k.startsWith(prefix)) delete tabDataCache[k]; });
+}
 // ------------------------------------------------------------
 // 離線管理：斷網時保留畫面現況、鎖定所有寫入操作（表單、按鈕、輸入框），
 // 只在頂部顯示提示條；網路恢復時跳出確認彈窗，使用者按下確定才重新整理頁面拿最新資料，
@@ -571,11 +579,20 @@ function esc(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;',
 function fmt(n){ return Number(n||0).toLocaleString('zh-TW', {maximumFractionDigits:0}); }
 function nameOf(uid){ const m = currentMembers.find(m=>m.uid===uid); return m ? m.displayName : '未知成員'; }
 function isMe(uid){ return currentUser && uid === currentUser.uid; }
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+// 用「手機本地時間」轉成 YYYY-MM-DD。
+// 不能用 toISOString()：它會先換成 UTC，台灣（UTC+8）凌晨 0～8 點會變成前一天，
+// 導致「今天」標示錯誤、新增一天的預設日期少一天、複製行程的日期整個差一天。
+function localDateStr(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function todayStr(){ return localDateStr(new Date()); }
 function addDaysToDateStr(dateStr, delta){
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + delta);
-  return d.toISOString().slice(0,10);
+  return localDateStr(d);
 }
 // 猜一個「新增一天」時最合理的預設日期：接續在已建立天數的最後一天之後；
 // 如果還沒建立任何一天，就從行程的出發日開始。只是預設值，不會限制使用者改選別的日期。
@@ -1485,6 +1502,7 @@ async function renderTripDetailView(){
         <h1 style="margin-bottom:0">${esc(currentTrip.name)}</h1>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px;">
+        <button id="refreshTabBtn" class="item-btn item-btn-edit" title="重新載入這一頁，看到其他團員最新的修改">🔄 更新</button>
         <button id="dupTripBtn" class="item-btn item-btn-edit">複製</button>
         <button id="editTripBtn" class="item-btn item-btn-edit">編輯</button>
       </div>
@@ -1506,6 +1524,7 @@ async function renderTripDetailView(){
   document.getElementById('backBtn').onclick = ()=>{ currentTrip=null; renderTripsView(); };
   document.getElementById('editTripBtn').onclick = ()=>openEditTripModal();
   document.getElementById('dupTripBtn').onclick = ()=>openDuplicateTripModal();
+  document.getElementById('refreshTabBtn').onclick = ()=>{ clearAllTripCache(); renderTabContent(); };
   document.getElementById('copyCodeBtn').onclick = ()=>{
     navigator.clipboard.writeText(currentTrip.id);
     const b = document.getElementById('copyCodeBtn');
@@ -1513,7 +1532,7 @@ async function renderTripDetailView(){
     setTimeout(()=>b.textContent='複製', 1500);
   };
   document.querySelectorAll('.tab-btn').forEach(btn=>{
-    btn.onclick = ()=>{ activeTab = btn.dataset.tab; updateTabUI(); renderTabContent(); };
+    btn.onclick = ()=>{ activeTab = btn.dataset.tab; clearAllTripCache(); updateTabUI(); renderTabContent(); };
   });
   updateTabUI();
   await renderTabContent();
@@ -1882,38 +1901,284 @@ const COUNTRY_NAMES_ZH_HANT = {
   CZ:'捷克', PL:'波蘭', SE:'瑞典', NO:'挪威', DK:'丹麥', FI:'芬蘭',
   RU:'俄羅斯', MX:'墨西哥', BR:'巴西', AR:'阿根廷', EG:'埃及', ZA:'南非'
 };
-async function geocodeCity(name){
-  // 不用 API 的 language=zh（會回傳簡體中文），改用使用者自己輸入的名稱 + 自己維護的繁體國名對照表
-  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`);
+// 常用旅遊城市：中文 → 英文。
+// 為什麼要這張表：Open-Meteo 的城市搜尋對「2 個字」的名稱只做完全比對，
+// 像「大阪」「東京」「京都」這種 2 個字的中文名常常搜不到，所以先轉成英文再搜尋最穩。
+// 一行一個城市，「|」分隔同一個城市的不同寫法（繁／簡／別名），「=」後面是英文名。
+const CITY_DICT_RAW = `
+東京|东京|東京都=Tokyo
+大阪|大阪市=Osaka
+京都|京都市=Kyoto
+奈良=Nara
+神戶|神户=Kobe
+名古屋=Nagoya
+橫濱|横滨=Yokohama
+札幌|北海道=Sapporo
+福岡|福冈=Fukuoka
+那霸|沖繩|冲绳=Naha
+廣島|广岛=Hiroshima
+仙台=Sendai
+金澤|金泽=Kanazawa
+箱根=Hakone
+日光=Nikko
+輕井澤|轻井泽=Karuizawa
+長崎|长崎=Nagasaki
+熊本=Kumamoto
+鹿兒島|鹿儿岛=Kagoshima
+別府|别府=Beppu
+由布院=Yufu
+函館|函馆=Hakodate
+小樽=Otaru
+富良野=Furano
+高松=Takamatsu
+岡山|冈山=Okayama
+姬路=Himeji
+河口湖=Fujikawaguchiko
+高山=Takayama
+松本=Matsumoto
+長野|长野=Nagano
+靜岡|静冈=Shizuoka
+新潟=Niigata
+鎌倉|镰仓=Kamakura
+成田=Narita
+熱海|热海=Atami
+首爾|首尔=Seoul
+釜山=Busan
+濟州|济州|濟州島|济州岛=Jeju City
+仁川=Incheon
+大邱=Daegu
+慶州|庆州=Gyeongju
+全州=Jeonju
+台北|臺北=Taipei
+新北=New Taipei
+桃園|桃园=Taoyuan
+台中|臺中=Taichung
+台南|臺南=Tainan
+高雄=Kaohsiung
+新竹=Hsinchu
+花蓮|花莲=Hualien
+台東|臺東=Taitung
+宜蘭|宜兰=Yilan
+嘉義|嘉义=Chiayi
+墾丁|垦丁=Hengchun
+澎湖=Magong
+金門|金门=Jincheng
+基隆=Keelung
+屏東|屏东=Pingtung
+南投=Nantou
+彰化=Changhua
+香港=Hong Kong
+澳門|澳门=Macau
+上海=Shanghai
+北京=Beijing
+廣州|广州=Guangzhou
+深圳=Shenzhen
+成都=Chengdu
+重慶|重庆=Chongqing
+杭州=Hangzhou
+西安=Xi'an
+廈門|厦门=Xiamen
+昆明=Kunming
+麗江|丽江=Lijiang
+哈爾濱|哈尔滨=Harbin
+青島|青岛=Qingdao
+蘇州|苏州=Suzhou
+南京=Nanjing
+桂林=Guilin
+三亞|三亚=Sanya
+拉薩|拉萨=Lhasa
+新加坡=Singapore
+曼谷=Bangkok
+清邁|清迈=Chiang Mai
+普吉島|普吉岛|普吉=Phuket
+芭達雅|芭提雅|芭堤雅|芭达雅=Pattaya
+蘇美島|苏梅岛=Ko Samui
+吉隆坡=Kuala Lumpur
+檳城|槟城=George Town
+沙巴|亞庇|亚庇=Kota Kinabalu
+蘭卡威|兰卡威=Langkawi
+馬六甲|马六甲=Malacca
+新山=Johor Bahru
+峇里島|巴厘岛|峇里|巴里島=Denpasar
+雅加達|雅加达=Jakarta
+河內|河内=Hanoi
+胡志明市|胡志明|西貢|西贡=Ho Chi Minh City
+峴港|岘港=Da Nang
+會安|会安=Hoi An
+芽莊|芽庄=Nha Trang
+富國島|富国岛=Phu Quoc
+馬尼拉|马尼拉=Manila
+宿霧|宿务=Cebu City
+金邊|金边=Phnom Penh
+暹粒=Siem Reap
+永珍|万象=Vientiane
+龍坡邦|琅勃拉邦|琅勃拉邦=Luang Prabang
+仰光=Yangon
+新德里=New Delhi
+孟買|孟买=Mumbai
+杜拜|迪拜=Dubai
+阿布達比|阿布扎比=Abu Dhabi
+伊斯坦堡|伊斯坦布尔=Istanbul
+加德滿都|加德满都=Kathmandu
+馬爾地夫|马尔代夫|馬列|马累=Male
+可倫坡|科伦坡=Colombo
+多哈=Doha
+倫敦|伦敦=London
+巴黎=Paris
+羅馬|罗马=Rome
+米蘭|米兰=Milan
+威尼斯=Venice
+佛羅倫斯|佛罗伦萨|翡冷翠=Florence
+那不勒斯=Naples
+巴塞隆納|巴塞罗那|巴塞隆那=Barcelona
+馬德里|马德里=Madrid
+里斯本=Lisbon
+阿姆斯特丹=Amsterdam
+布魯塞爾|布鲁塞尔=Brussels
+柏林=Berlin
+慕尼黑=Munich
+法蘭克福|法兰克福=Frankfurt
+維也納|维也纳=Vienna
+布拉格=Prague
+布達佩斯|布达佩斯=Budapest
+蘇黎世|苏黎世=Zurich
+日內瓦|日内瓦=Geneva
+琉森|卢塞恩=Lucerne
+雅典=Athens
+哥本哈根=Copenhagen
+斯德哥爾摩|斯德哥尔摩=Stockholm
+奧斯陸|奥斯陆=Oslo
+赫爾辛基|赫尔辛基=Helsinki
+雷克雅維克|雷克雅未克=Reykjavik
+都柏林=Dublin
+愛丁堡|爱丁堡=Edinburgh
+莫斯科=Moscow
+華沙|华沙=Warsaw
+克拉科夫=Krakow
+薩爾茲堡|萨尔茨堡=Salzburg
+紐約|纽约=New York
+洛杉磯|洛杉矶=Los Angeles
+舊金山|旧金山=San Francisco
+西雅圖|西雅图=Seattle
+拉斯維加斯|拉斯维加斯=Las Vegas
+芝加哥=Chicago
+波士頓|波士顿=Boston
+華盛頓|华盛顿=Washington
+邁阿密|迈阿密=Miami
+夏威夷|檀香山=Honolulu
+溫哥華|温哥华=Vancouver
+多倫多|多伦多=Toronto
+蒙特婁|蒙特利尔=Montreal
+墨西哥城=Mexico City
+坎昆=Cancun
+里約|里约热内卢|里約熱內盧=Rio de Janeiro
+布宜諾斯艾利斯|布宜诺斯艾利斯=Buenos Aires
+雪梨|悉尼=Sydney
+墨爾本|墨尔本=Melbourne
+布里斯本|布里斯班=Brisbane
+伯斯|珀斯=Perth
+黃金海岸|黄金海岸=Gold Coast
+奧克蘭|奥克兰=Auckland
+皇后鎮|皇后镇=Queenstown
+基督城=Christchurch
+開羅|开罗=Cairo
+開普敦|开普敦=Cape Town
+`;
+const CITY_ZH_TO_EN = (()=>{
+  const map = {};
+  CITY_DICT_RAW.split('\n').forEach(line=>{
+    line = line.trim();
+    if(!line) return;
+    const idx = line.lastIndexOf('=');
+    if(idx < 0) return;
+    const en = line.slice(idx+1).trim();
+    line.slice(0, idx).split('|').forEach(n=>{ n = n.trim(); if(n) map[n] = en; });
+  });
+  return map;
+})();
+function lookupCityEnglish(input){
+  const q = (input||'').trim();
+  if(CITY_ZH_TO_EN[q]) return CITY_ZH_TO_EN[q];
+  // 「大阪市」「京都府」「東京都」→ 去掉行政區字尾再找
+  const stripped = q.replace(/[市縣县府都區区]$/, '');
+  if(stripped !== q && CITY_ZH_TO_EN[stripped]) return CITY_ZH_TO_EN[stripped];
+  // 「日本大阪」「大阪車站」這種前後有多餘文字：找輸入裡包含的最長城市名
+  let best = null;
+  for(const k in CITY_ZH_TO_EN){
+    if(q.includes(k) && (!best || k.length > best.length)) best = k;
+  }
+  return best ? CITY_ZH_TO_EN[best] : null;
+}
+async function searchOpenMeteo(name){
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10`);
+  if(!res.ok) throw new Error('城市搜尋服務目前無法連線');
   const data = await res.json();
-  if(!data.results || data.results.length===0) return null;
-  const r = data.results[0];
-  const countryZh = COUNTRY_NAMES_ZH_HANT[r.country_code] || '';
-  return { name: countryZh ? `${name}，${countryZh}` : name, lat:r.latitude, lon:r.longitude };
+  const list = data.results || [];
+  if(list.length === 0) return null;
+  // 同名城市很多（例如好幾個 Paris），挑人口最多的那個，最可能是旅客要找的
+  return list.slice().sort((a,b)=>(b.population||0)-(a.population||0))[0];
+}
+async function geocodeCity(input){
+  const q = (input||'').trim();
+  if(!q) return null;
+  const hasCJK = /[\u3400-\u9fff]/.test(q);
+  const tries = [];
+  if(hasCJK){
+    const en = lookupCityEnglish(q);
+    if(en) tries.push(en);          // 1. 常用城市：先用英文名搜尋（最準）
+    tries.push(q);                  // 2. 直接用中文搜尋
+    if(!/[市縣县府都區区]$/.test(q)) tries.push(q + '市'); // 3. 補上「市」再試
+  }else{
+    tries.push(q);
+  }
+  let found = null;
+  for(const t of [...new Set(tries)]){
+    if(t.length < 2) continue;      // API 規定：只有 1 個字會回傳空結果
+    found = await searchOpenMeteo(t);
+    if(found) break;
+  }
+  if(!found) return null;
+  const countryZh = COUNTRY_NAMES_ZH_HANT[found.country_code] || '';
+  // 顯示用的名稱沿用使用者自己輸入的寫法
+  return { name: countryZh ? `${q}，${countryZh}` : q, lat:found.latitude, lon:found.longitude };
 }
 async function fetchWeatherData(){
   if(weatherCache && weatherCache.tripId===currentTrip.id) return weatherCache;
-  // past_days 涵蓋最近幾天，forecast_days 涵蓋未來 16 天，這樣「今天」跟大部分想查的日期都查得到
-  const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentTrip.destinationLat}&longitude=${currentTrip.destinationLon}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto&past_days=5&forecast_days=16`);
+  // past_days 涵蓋最近幾天，forecast_days 涵蓋未來 16 天（API 上限），
+  // 這樣「今天」跟大部分想查的日期都查得到
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentTrip.destinationLat}&longitude=${currentTrip.destinationLon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&past_days=5&forecast_days=16`);
+  if(!res.ok) throw new Error('天氣服務目前無法連線');
   const data = await res.json();
+  if(!data.daily) throw new Error('天氣資料格式不正確');
   const dates = data.daily.time, codes = data.daily.weathercode, maxT = data.daily.temperature_2m_max, minT = data.daily.temperature_2m_min;
+  const rainP = data.daily.precipitation_probability_max || [];
   const allDays = dates.map((dt,i)=>({
     date: dt,
     dateLabel: dt.slice(5).replace('-','/')+' '+weekdayLabel(dt),
     emoji: weatherEmoji(codes[i]),
     text: weatherText(codes[i]),
     max: Math.round(maxT[i]),
-    min: Math.round(minT[i])
+    min: Math.round(minT[i]),
+    rain: (rainP[i]==null) ? null : Math.round(rainP[i])
   }));
   const byDate = {};
   allDays.forEach(d=>{ byDate[d.date] = d; });
-  const tripDays = allDays.filter(d=>d.date>=currentTrip.startDate && d.date<=currentTrip.endDate);
   weatherCache = {
-    tripId: currentTrip.id, allDays, byDate, tripDays,
+    tripId: currentTrip.id, allDays, byDate,
     minDate: allDays[0] ? allDays[0].date : todayStr(),
     maxDate: allDays[allDays.length-1] ? allDays[allDays.length-1].date : todayStr()
   };
   return weatherCache;
+}
+function weatherCardHTML(d, isTrip){
+  return `
+    <div data-wdate="${d.date}" style="flex:0 0 auto;min-width:78px;text-align:center;background:${isTrip?'#FFF6F0':'var(--paper)'};border:${isTrip?'2px solid var(--vermillion)':'1px solid var(--border)'};border-radius:10px;padding:10px 8px;cursor:pointer;">
+      <div style="font-size:11px;color:var(--muted);">${d.dateLabel}</div>
+      <div style="font-size:24px;margin:4px 0;">${d.emoji}</div>
+      <div style="font-size:12.5px;font-family:var(--font-mono);">${d.max}°/${d.min}°</div>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:2px;min-height:14px;">${d.rain==null ? '' : '☔ '+d.rain+'%'}</div>
+    </div>
+  `;
 }
 async function renderWeatherSection(){
   const el = document.getElementById('weatherSection');
@@ -1923,9 +2188,9 @@ async function renderWeatherSection(){
     el.innerHTML = `
       <div class="card">
         <h2>🌤️ 天氣預報</h2>
-        <p class="subtitle" style="margin-bottom:12px">設定目的地城市，就能看到行程期間的天氣預報</p>
+        <p class="subtitle" style="margin-bottom:12px">設定目的地城市，就能看到未來多天的天氣預報（可以直接輸入中文，例如：大阪、東京、京都）</p>
         <form id="setDestinationForm" style="display:flex;gap:8px;">
-          <input type="text" id="destinationInput" placeholder="例如：大阪、東京、Osaka" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required>
+          <input type="text" id="destinationInput" placeholder="例如：大阪、東京、京都、Osaka" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required>
           <button type="submit" class="btn btn-outline">設定</button>
         </form>
       </div>
@@ -1938,7 +2203,7 @@ async function renderWeatherSection(){
       btn.disabled = true; btn.textContent = '搜尋中…';
       try{
         const geo = await geocodeCity(city);
-        if(!geo){ alert('找不到這個城市，換個名稱試試（可以試試英文拼音）'); btn.disabled=false; btn.textContent='設定'; return; }
+        if(!geo){ alert('找不到這個城市。\n可以試試常見寫法（例如：大阪、東京、京都、曼谷），或改用英文（例如：Osaka）'); btn.disabled=false; btn.textContent='設定'; return; }
         await db.collection('trips').doc(currentTrip.id).update({
           destinationCity: geo.name, destinationLat: geo.lat, destinationLon: geo.lon
         });
@@ -1978,6 +2243,10 @@ async function renderWeatherSection(){
   const bodyEl = document.getElementById('weatherBody');
   try{
     const wdata = await fetchWeatherData();
+    const todayKey = todayStr();
+    const upcoming = wdata.allDays.filter(d=>d.date >= todayKey);
+    const inTrip = (d)=> currentTrip.startDate && d.date >= currentTrip.startDate && d.date <= currentTrip.endDate;
+    const tripInRange = upcoming.some(inTrip);
     bodyEl.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
         <div class="date-wrap" style="flex:1;min-width:140px;">
@@ -1986,18 +2255,13 @@ async function renderWeatherSection(){
         <button type="button" class="btn btn-outline" id="weatherTodayBtn" style="flex-shrink:0;">今天</button>
       </div>
       <div id="weatherSingleDay"></div>
-      ${wdata.tripDays.length>0 ? `
-        <p class="subtitle" style="margin:14px 0 8px;">行程期間預報</p>
-        <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;">
-          ${wdata.tripDays.map(d=>`
-            <div style="flex:0 0 auto;min-width:74px;text-align:center;background:var(--paper);border:1px solid var(--border);border-radius:10px;padding:10px 8px;">
-              <div style="font-size:11px;color:var(--muted);">${d.dateLabel}</div>
-              <div style="font-size:24px;margin:4px 0;">${d.emoji}</div>
-              <div style="font-size:12.5px;font-family:var(--font-mono);">${d.max}°/${d.min}°</div>
-            </div>
-          `).join('')}
-        </div>
-      ` : `<div class="empty-state" style="margin-top:10px;">目前查得到的預報還沒到你的旅行日期，出發前幾天再回來看看吧</div>`}
+      <p class="subtitle" style="margin:14px 0 8px;">未來 ${upcoming.length} 天預報（可左右滑動，點一下看詳細）</p>
+      <div id="weatherStrip" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;">
+        ${upcoming.map(d=>weatherCardHTML(d, inTrip(d))).join('')}
+      </div>
+      ${tripInRange
+        ? `<p class="subtitle" style="margin:6px 0 0;font-size:12px;">🔸 橘色外框＝旅行期間（${currentTrip.startDate} → ${currentTrip.endDate}）</p>`
+        : `<p class="subtitle" style="margin:6px 0 0;font-size:12px;">你的旅行日期（${currentTrip.startDate} → ${currentTrip.endDate}）還沒進入預報範圍，最多只能預報未來 16 天，出發前幾天再回來看看吧</p>`}
     `;
     function renderSingleDay(dateStr){
       const singleEl = document.getElementById('weatherSingleDay');
@@ -2011,7 +2275,7 @@ async function renderWeatherSection(){
           <div style="font-size:40px;">${d.emoji}</div>
           <div>
             <div style="font-weight:600;font-size:14px;">${d.dateLabel} · ${esc(d.text)}</div>
-            <div style="font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);margin-top:2px;">最高 ${d.max}° / 最低 ${d.min}°</div>
+            <div style="font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);margin-top:2px;">最高 ${d.max}° / 最低 ${d.min}°${d.rain==null ? '' : ` · ☔ 降雨機率 ${d.rain}%`}</div>
           </div>
         </div>
       `;
@@ -2023,6 +2287,12 @@ async function renderWeatherSection(){
       datePickEl.value = t;
       renderSingleDay(t);
     };
+    document.querySelectorAll('#weatherStrip [data-wdate]').forEach(card=>{
+      card.onclick = ()=>{
+        datePickEl.value = card.dataset.wdate;
+        renderSingleDay(card.dataset.wdate);
+      };
+    });
     renderSingleDay(datePickEl.value);
   }catch(err){
     bodyEl.innerHTML = `<div class="empty-state">天氣資料載入失敗：${esc(err.message)}</div>`;
@@ -2289,7 +2559,7 @@ async function renderItineraryTab(el){
       <div class="day-header" data-day-view="${d.id}">
         <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
         <div style="display:flex;gap:6px;">
-          ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-edit" data-day-edit="${d.id}">編輯</button>` : ''}
+          <button class="item-btn item-btn-edit" data-day-edit="${d.id}">編輯</button>
           ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-del" data-del-day="${d.id}">刪除整天</button>` : ''}
         </div>
       </div>
@@ -2304,7 +2574,7 @@ async function renderItineraryTab(el){
         </div>
       </div>
       <div class="items-container" data-items-for="${d.id}"><div class="empty-state">載入中…</div></div>
-      ${isMe(currentTrip.ownerId) ? `<button type="button" class="btn btn-outline btn-block toggle-add-item" data-day-id="${d.id}" style="margin-top:12px">＋ 新增行程項目</button>` : ''}
+      <button type="button" class="btn btn-outline btn-block toggle-add-item" data-day-id="${d.id}" style="margin-top:12px">＋ 新增行程項目</button>
       <form class="add-item-form hidden" data-add-item-for="${d.id}" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
         <div class="field-row">
           <div class="field" style="flex:0 0 96px">
@@ -2435,6 +2705,12 @@ async function renderItineraryTab(el){
   for(const d of days){ renderItemsFor(d.id); }
 }
 
+// 共同行程：任何團員都可以編輯／刪除；私人行程只有建立者本人可以改
+function canEditItem(it){
+  if(!currentUser) return false;
+  if(it.visibility === 'private') return it.authorUid === currentUser.uid;
+  return true;
+}
 function itineraryItemRowHTML(it){
   return `
     <div class="item-row ${it.visibility==='private' ? 'item-row-private' : ''}" data-item-row="${it.id}">
@@ -2447,8 +2723,8 @@ function itineraryItemRowHTML(it){
         ${itemPrivateTagHTML(it)}
       </div>
       <div class="item-actions">
-        ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>` : ''}
-        ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>` : ''}
+        ${canEditItem(it) ? `<button class="item-btn item-btn-edit" data-item-edit="${it.id}">編輯</button>` : ''}
+        ${canEditItem(it) ? `<button class="item-btn item-btn-del" data-del-item="${it.id}">刪除</button>` : ''}
       </div>
     </div>
   `;
@@ -2510,7 +2786,7 @@ async function renderItemsFor(dayId){
           <div class="field-row">
             <div class="field" style="flex:0 0 96px"><label>時</label><select class="it-hour">${hourOptionsHTML().replace(`value="${h}"`, `value="${h}" selected`)}</select></div>
             <div class="field" style="flex:0 0 96px"><label>分</label><select class="it-min">${minOptionsHTML().replace(`value="${m}"`, `value="${m}" selected`)}</select></div>
-            <div class="field" style="flex:1 1 180px"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" maxlength="20" required></div>
+            <div class="field" style="flex:1 1 180px"><label>要去哪裡／做什麼</label><input type="text" class="it-title" value="${esc(item.title)}" maxlength="40" required></div>
           </div>
           <p class="subtitle" style="margin:0 0 6px;font-size:12px;">結束時間（選填，不填也沒關係）</p>
           <div class="field-row">
@@ -2546,7 +2822,8 @@ async function renderItemsFor(dayId){
           link: formEl.querySelector('.it-link').value.trim(),
           visibility: priv.visibility,
           visibleTo: priv.visibleTo,
-          authorUid: item.authorUid || currentUser.uid
+          // 改成私人時，建立者換成目前編輯的人，確保編輯者自己看得到這筆
+          authorUid: priv.visibility === 'private' ? currentUser.uid : (item.authorUid || currentUser.uid)
         });
         clearTabCache('items', dayId);
         renderItemsFor(dayId);
@@ -2697,41 +2974,54 @@ function packCategorySelectOptionsHTML(categories, selected){
   return opts + `<option value="${NEW_CATEGORY_VALUE}">＋ 新增自訂類別…</option>`;
 }
 
-async function renderPackingSection(el){
+async function renderPackingSection(el, opts){
+  // shared=true：共同打包清單（全團可見、大家都能新增／勾選／刪除）
+  // shared=false：我的打包清單（只有自己看得到）
+  const shared = !!(opts && opts.shared);
+  const collName = shared ? 'sharedPackingItems' : 'packingItems';
+  const cacheName = shared ? 'sharedPacking' : 'packing';
+  const myName = ()=> (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員';
+
   el.innerHTML = `
     <div class="card">
-      <h2>🎒 我的打包清單</h2>
-      <p class="subtitle" style="margin-bottom:10px;">只有你自己看得到，勾選代表已經帶了，可以自訂分類</p>
-      <div id="packProgress" class="pack-progress"></div>
-      <div id="packList"><div class="empty-state" style="padding:14px 0;">載入中…</div></div>
-      <form id="addPackForm" style="margin-top:10px;">
+      <h2>${shared ? '👥 共同打包清單' : '🎒 我的打包清單'}</h2>
+      <p class="subtitle" style="margin-bottom:10px;">${shared
+        ? '全團都看得到，大家都可以新增、勾選、刪除，適合共用的東西（例如：吹風機、轉接頭、常備藥）'
+        : '只有你自己看得到，勾選代表已經帶了，可以自訂分類'}</p>
+      <div class="pack-progress pk-progress"></div>
+      <div class="pk-list"><div class="empty-state" style="padding:14px 0;">載入中…</div></div>
+      <form class="pk-form" style="margin-top:10px;">
         <div class="field" style="margin-bottom:8px;">
-          <select id="packCategorySelect" class="pack-category-select"></select>
+          <select class="pack-category-select pk-cat"></select>
         </div>
-        <div class="field hidden" id="packNewCategoryWrap" style="margin-bottom:8px;">
-          <input type="text" id="packNewCategoryInput" placeholder="輸入新的類別名稱，例如：登山用品" maxlength="20" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;">
+        <div class="field hidden pk-new-wrap" style="margin-bottom:8px;">
+          <input type="text" class="pk-new-input" placeholder="輸入新的類別名稱，例如：登山用品" maxlength="20" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;">
         </div>
         <div style="display:flex;gap:8px;">
-          <input type="text" id="packItemInput" placeholder="例如：護照、充電線、雨傘…" style="flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required maxlength="40">
+          <input type="text" class="pk-item-input" placeholder="例如：護照、充電線、雨傘…" style="flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;" required maxlength="40">
           <button type="submit" class="btn btn-outline" style="flex-shrink:0;">新增</button>
         </div>
       </form>
     </div>
   `;
+  const q = (sel)=>el.querySelector(sel);
 
-  const itemsCacheKey = tabCacheKey('packing');
-  const catCacheKey = tabCacheKey('packingCategories');
+  const itemsCacheKey = tabCacheKey(cacheName);
+  const catCacheKey = tabCacheKey(cacheName + 'Categories');
   let items = tabDataCache[itemsCacheKey];
   let customCategories = tabDataCache[catCacheKey];
-  const collectionRef = db.collection('trips').doc(currentTrip.id).collection('packingItems');
-  const catDocRef = db.collection('trips').doc(currentTrip.id).collection('packingCategories').doc(currentUser.uid);
+  const collectionRef = db.collection('trips').doc(currentTrip.id).collection(collName);
+  // 自訂類別只有「我的清單」會另外存；共同清單的類別直接取自大家已經加過的項目
+  const catDocRef = shared ? null : db.collection('trips').doc(currentTrip.id).collection('packingCategories').doc(currentUser.uid);
 
   let loadError = false;
   if(!items){
     try{
-      // 只用 where 篩選，不加 orderBy：where(userId) + orderBy(createdAt) 這種組合查詢需要先在 Firestore
-      // 建立複合索引才能用，沒建立的話查詢會直接失敗；改成抓回來後在瀏覽器端自己排序，就不需要額外的索引
-      const snap = await collectionRef.where('userId','==', currentUser.uid).get();
+      // 個人清單只用 where 篩選、共同清單整份抓，都不加 orderBy（避免需要建立複合索引），
+      // 抓回來後在瀏覽器端依時間排序
+      const snap = shared
+        ? await collectionRef.get()
+        : await collectionRef.where('userId','==', currentUser.uid).get();
       items = snap.docs.map(d=>({id:d.id, ...d.data()}));
       items.sort((a,b)=>{
         const ta = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : 0;
@@ -2746,16 +3036,20 @@ async function renderPackingSection(el){
     tabDataCache[itemsCacheKey] = items;
   }
   if(!customCategories){
-    try{
-      const catSnap = await catDocRef.get();
-      customCategories = catSnap.exists ? (catSnap.data().names || []) : [];
-    }catch(err){
+    if(shared){
       customCategories = [];
+    }else{
+      try{
+        const catSnap = await catDocRef.get();
+        customCategories = catSnap.exists ? (catSnap.data().names || []) : [];
+      }catch(err){
+        customCategories = [];
+      }
     }
     tabDataCache[catCacheKey] = customCategories;
   }
 
-  // 若舊資料裡有用過、但還沒被存進自訂類別清單的分類名稱（例如舊版沒有分類欄位前建立的項目），也一併補進選項，避免漏掉
+  // 若舊資料裡有用過、但還沒被存進自訂類別清單的分類名稱，也一併補進選項，避免漏掉
   function allCategories(){
     const known = new Set([...DEFAULT_PACK_CATEGORIES, ...customCategories]);
     const extra = [];
@@ -2767,30 +3061,30 @@ async function renderPackingSection(el){
   }
 
   function populateCategorySelect(selectedValue){
-    const selectEl = document.getElementById('packCategorySelect');
+    const selectEl = q('.pk-cat');
     if(!selectEl) return;
     selectEl.innerHTML = packCategorySelectOptionsHTML(allCategories(), selectedValue);
   }
   populateCategorySelect(DEFAULT_PACK_CATEGORIES[0]);
 
-  const categorySelectEl = document.getElementById('packCategorySelect');
-  const newCategoryWrap = document.getElementById('packNewCategoryWrap');
-  const newCategoryInput = document.getElementById('packNewCategoryInput');
+  const categorySelectEl = q('.pk-cat');
+  const newCategoryWrap = q('.pk-new-wrap');
+  const newCategoryInput = q('.pk-new-input');
   categorySelectEl.onchange = ()=>{
     newCategoryWrap.classList.toggle('hidden', categorySelectEl.value !== NEW_CATEGORY_VALUE);
     if(categorySelectEl.value === NEW_CATEGORY_VALUE) newCategoryInput.focus();
   };
 
   function renderList(){
-    const listEl = document.getElementById('packList');
-    const progressEl = document.getElementById('packProgress');
+    const listEl = q('.pk-list');
+    const progressEl = q('.pk-progress');
     if(!listEl) return;
     const packedCount = items.filter(it=>it.packed).length;
     progressEl.textContent = items.length===0 ? '' : `已打包 ${packedCount} / ${items.length} 項`;
     if(items.length===0){
       listEl.innerHTML = loadError
         ? `<div class="empty-state" style="color:var(--danger);padding:14px 0;">清單載入失敗：${esc(loadError)}</div>`
-        : `<div class="empty-state" style="padding:14px 0;">還沒有加入任何物品，開始列你的打包清單吧</div>`;
+        : `<div class="empty-state" style="padding:14px 0;">${shared ? '還沒有人加入共同物品，大家一起列清單吧' : '還沒有加入任何物品，開始列你的打包清單吧'}</div>`;
       return;
     }
     // 依分類分組，順序：預設分類 → 自訂分類 → 其他曾經用過的分類；分類內依加入時間排序
@@ -2811,13 +3105,18 @@ async function renderPackingSection(el){
             <span>${esc(cat)}</span>
             <span class="pack-category-count">${packedInCat} / ${catItems.length}</span>
           </div>
-          ${catItems.map(it=>`
+          ${catItems.map(it=>{
+            // 共同清單：標示是誰加的、誰已經帶了
+            const by = shared
+              ? (it.packed && it.packedByName ? `✓ ${esc(it.packedByName)} 已帶` : (it.addedByName ? `${esc(it.addedByName)} 加入` : ''))
+              : '';
+            return `
             <div class="pack-row pack-row-colored ${it.packed ? 'packed' : ''}" data-pack-row="${it.id}" style="border-left-color:${color.bg};">
               <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" style="accent-color:${color.text};" ${it.packed?'checked':''}>
-              <span class="pack-item-name">${esc(it.name)}</span>
+              <span class="pack-item-name">${esc(it.name)}${by ? `<span class="pack-by">${by}</span>` : ''}</span>
               <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
-            </div>
-          `).join('')}
+            </div>`;
+          }).join('')}
         </div>
       `;
     }).join('');
@@ -2827,9 +3126,14 @@ async function renderPackingSection(el){
         const item = items.find(x=>x.id===id);
         if(!item) return;
         item.packed = cb.checked;
+        if(shared){ item.packedByName = item.packed ? myName() : null; }
         renderList();
         try{
-          await collectionRef.doc(id).update({packed: item.packed});
+          const data = { packed: item.packed };
+          if(shared){
+            data.packedByName = item.packed ? myName() : firebase.firestore.FieldValue.delete();
+          }
+          await collectionRef.doc(id).update(data);
         }catch(err){
           item.packed = !item.packed;
           renderList();
@@ -2853,9 +3157,9 @@ async function renderPackingSection(el){
   }
   renderList();
 
-  document.getElementById('addPackForm').onsubmit = async (e)=>{
+  q('.pk-form').onsubmit = async (e)=>{
     e.preventDefault();
-    const input = document.getElementById('packItemInput');
+    const input = q('.pk-item-input');
     const name = input.value.trim();
     if(!name) return;
     let category = categorySelectEl.value;
@@ -2866,8 +3170,8 @@ async function renderPackingSection(el){
         const typed = newCategoryInput.value.trim();
         if(!typed){ alert('請輸入新的類別名稱'); submitBtn.disabled = false; return; }
         category = typed;
-        // 存成這個使用者往後可以重複選用的自訂類別，下次就不用再打一次字
-        if(!customCategories.includes(category) && !DEFAULT_PACK_CATEGORIES.includes(category)){
+        // 我的清單：存成往後可以重複選用的自訂類別，下次就不用再打一次字
+        if(!shared && !customCategories.includes(category) && !DEFAULT_PACK_CATEGORIES.includes(category)){
           customCategories = [...customCategories, category];
           tabDataCache[catCacheKey] = customCategories;
           try{
@@ -2881,6 +3185,7 @@ async function renderPackingSection(el){
         name, category, packed:false, userId: currentUser.uid,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
+      if(shared) newItem.addedByName = myName();
       const ref = await collectionRef.add(newItem);
       items.push({id:ref.id, ...newItem, createdAt:{toDate:()=>new Date()}});
       tabDataCache[itemsCacheKey] = items;
@@ -3101,7 +3406,7 @@ function postCardHTML(p){
         ${avatarChipHTML(author, 30)}
         <div style="min-width:0;">
           <div style="font-weight:600;font-size:13.5px;">${esc(authorName)}${isMe(p.authorUid)?'（我）':''}</div>
-          <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}${p.editedAt ? '（已編輯）' : ''}</div>
+          <div class="record-meta" style="margin-top:0;">${formatPostTime(p.createdAt)}${p.editedAt ? (p.editedByName && p.editedByName !== authorName ? `（${esc(p.editedByName)} 已編輯）` : '（已編輯）') : ''}</div>
         </div>
       </div>
       ${postTextHTML(p.text, images.length>0)}
@@ -3115,12 +3420,10 @@ function postCardHTML(p){
         </button>
       </div>
       <div class="post-comments-section hidden" data-comments-for="${p.id}"></div>
-      ${isMe(p.authorUid) ? `
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
-          <button class="item-btn item-btn-edit" data-edit-post="${p.id}">編輯</button>
-          <button class="item-btn item-btn-del" data-del-post="${p.id}">刪除這篇</button>
-        </div>
-      ` : ''}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+        <button class="item-btn item-btn-edit" data-edit-post="${p.id}">編輯</button>
+        ${isMe(p.authorUid) ? `<button class="item-btn item-btn-del" data-del-post="${p.id}">刪除這篇</button>` : ''}
+      </div>
     </div>
   `;
 }
@@ -3176,6 +3479,15 @@ async function renderPostsTab(el){
       </h2>
       <div class="collapsible-content" id="packingContent" style="display:none;padding:0;">
         <div id="packingSection" style="margin-top:16px;"></div>
+      </div>
+    </div>
+    <div class="collapsible-section">
+      <h2 class="collapsible-header" data-toggle="sharedpacking" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin:20px 0 0;border-bottom:1px solid var(--border);">
+        <span>👥 共同打包清單</span>
+        <span class="collapsible-icon" style="font-size:18px;">▶</span>
+      </h2>
+      <div class="collapsible-content" id="sharedPackingContent" style="display:none;padding:0;">
+        <div id="sharedPackingSection" style="margin-top:16px;"></div>
       </div>
     </div>
     <div class="collapsible-section">
@@ -3239,6 +3551,7 @@ async function renderPostsTab(el){
   });
 
     renderPackingSection(document.getElementById('packingSection'));
+    renderPackingSection(document.getElementById('sharedPackingSection'), {shared:true});
     bindFormatToolbar(document.getElementById('addPostForm'), document.getElementById('postText'));
 
   let pendingPostImages = [];
@@ -3379,6 +3692,7 @@ async function renderPostsTab(el){
           const updateData = {
             text,
             editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            editedByName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員',
             image: firebase.firestore.FieldValue.delete() // 舊版單張圖片欄位，統一改存 images 陣列
           };
           if(pendingImages.length>0){
