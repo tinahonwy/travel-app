@@ -258,6 +258,11 @@ body.app-offline .ann-dont-show input{opacity:1; pointer-events:auto;}
   .pack-category-title .pack-category-count{font-weight:400;font-size:11.5px;opacity:.75;}
   .pack-row.pack-row-colored{border-left:3px solid transparent;padding-left:8px;}
   .pack-category-select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--paper);color:var(--ink);}
+  /* 共同打包清單：全員帶齊＝綠底，還有人沒帶＝紅底 */
+  .pack-row.pack-all{background:#DDEFD0;border-bottom:none;border-radius:8px;padding:9px 8px;margin:4px 0;}
+  .pack-row.pack-missing{background:#FBE0DB;border-bottom:none;border-radius:8px;padding:9px 8px;margin:4px 0;}
+  .pack-row.pack-all .pack-by{color:#3F6B24;font-weight:600;}
+  .pack-row.pack-missing .pack-by{color:#B3261E;}
 
   @media (max-width:600px){
     .container{padding:20px 12px 60px;}
@@ -3141,6 +3146,9 @@ async function renderPackingSection(el, opts){
   const isPacked = (it)=> shared
     ? !!(it.packedBy && it.packedBy[currentUser.uid])
     : !!it.packed;
+  // 共同清單：行程裡的每一位團員都勾了，才算「大家都帶了」
+  const isAllPacked = (it)=> currentMembers.length > 0 &&
+    currentMembers.every(m => it.packedBy && it.packedBy[m.uid]);
 
   const itemsCacheKey = tabCacheKey(cacheName);
   const catCacheKey = tabCacheKey(cacheName + 'Categories');
@@ -3216,7 +3224,9 @@ async function renderPackingSection(el, opts){
     const progressEl = q('.pk-progress');
     if(!listEl) return;
     const packedCount = items.filter(isPacked).length;
-    progressEl.textContent = items.length===0 ? '' : `已打包 ${packedCount} / ${items.length} 項`;
+    progressEl.textContent = items.length===0 ? '' : (shared
+      ? `你已打包 ${packedCount} / ${items.length} 項 · 全員帶齊 ${items.filter(isAllPacked).length} 項`
+      : `已打包 ${packedCount} / ${items.length} 項`);
     if(items.length===0){
       listEl.innerHTML = loadError
         ? `<div class="empty-state" style="color:var(--danger);padding:14px 0;">清單載入失敗：${esc(loadError)}</div>`
@@ -3242,15 +3252,29 @@ async function renderPackingSection(el, opts){
             <span class="pack-category-count">${packedInCat} / ${catItems.length}</span>
           </div>
           ${catItems.map(it=>{
-            // 共同清單：標示是誰加的，以及「其他團員」誰已經帶了（自己的勾選直接看打勾框）
+            // 共同清單：全員都勾了 → 綠底；還有人沒帶 → 紅底，並列出誰帶了、誰還沒帶，方便互相提醒
             let by = '';
+            let statusClass = '';
             if(shared){
-              const others = Object.keys(it.packedBy || {}).filter(uid => it.packedBy[uid] && !isMe(uid)).map(nameOf);
-              by = [it.addedByName ? `${esc(it.addedByName)} 加入` : '', others.length ? `✓ ${others.map(esc).join('、')} 已帶` : ''].filter(Boolean).join(' · ');
+              const pb = it.packedBy || {};
+              const havePacked = currentMembers.filter(m => pb[m.uid]);
+              const notYet = currentMembers.filter(m => !pb[m.uid]);
+              const label = (m)=> isMe(m.uid) ? '你' : esc(m.displayName);
+              const allDone = isAllPacked(it);
+              statusClass = allDone ? 'pack-all' : 'pack-missing';
+              const lines = [];
+              if(it.addedByName) lines.push(`${esc(it.addedByName)} 加入`);
+              if(allDone){
+                lines.push('✅ 大家都帶了');
+              }else{
+                if(havePacked.length) lines.push(`✓ 已帶：${havePacked.map(label).join('、')}`);
+                lines.push(`✗ 還沒帶：${notYet.map(label).join('、')}`);
+              }
+              by = lines.join('<br>');
             }
             const packedNow = isPacked(it);
             return `
-            <div class="pack-row pack-row-colored ${packedNow ? 'packed' : ''}" data-pack-row="${it.id}" style="border-left-color:${color.bg};">
+            <div class="pack-row pack-row-colored ${(!shared && packedNow) ? 'packed' : ''} ${statusClass}" data-pack-row="${it.id}" style="border-left-color:${color.bg};">
               <input type="checkbox" class="pack-check" data-pack-toggle="${it.id}" style="accent-color:${color.text};" ${packedNow?'checked':''}>
               <span class="pack-item-name">${esc(it.name)}${by ? `<span class="pack-by">${by}</span>` : ''}</span>
               <button class="btn-danger" data-del-pack="${it.id}">刪除</button>
