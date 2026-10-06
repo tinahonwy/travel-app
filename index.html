@@ -2705,7 +2705,7 @@ async function renderItineraryTab(el){
         <div><span class="date-tag">${d.date}</span><strong>${esc(d.title)}</strong></div>
         <div style="display:flex;gap:6px;">
           <button class="item-btn item-btn-edit" data-day-edit="${d.id}">編輯</button>
-          ${isMe(currentTrip.ownerId) ? `<button class="item-btn item-btn-del" data-del-day="${d.id}">刪除整天</button>` : ''}
+          <button class="item-btn item-btn-del" data-del-day="${d.id}">刪除整天</button>
         </div>
       </div>
       <div class="edit-item-form hidden" data-day-edit-form="${d.id}">
@@ -2782,10 +2782,32 @@ async function renderItineraryTab(el){
 
   daysListEl.querySelectorAll('[data-del-day]').forEach(btn=>{
     btn.onclick = async ()=>{
-      if(!confirm('確定要刪除這一天嗎？')) return;
-      await db.collection('trips').doc(currentTrip.id).collection('days').doc(btn.dataset.delDay).delete();
+      const dayId = btn.dataset.delDay;
+      const dayObj = days.find(x=>x.id===dayId) || {};
+      const dayRef = db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId);
+      // 任何團員都能刪除整天，所以先清楚警告：寫出是哪一天、底下有幾筆行程
+      let countText = '';
+      try{
+        const itemsSnap = await dayRef.collection('items').get();
+        const n = itemsSnap.docs.map(d=>d.data()).filter(canSeeItem).length;
+        if(n > 0) countText = `這一天目前有 ${n} 筆行程項目。\n`;
+      }catch(e){}
+      const label = `${dayObj.date || ''} ${dayObj.title || ''}`.trim() || '這一天';
+      const ok = confirm(
+        `⚠️ 即將刪除整天：${label}\n\n` +
+        countText +
+        `刪除後，這一天和底下的行程項目會從所有團員的畫面消失，而且無法復原。\n\n` +
+        `確定要刪除嗎？`
+      );
+      if(!ok) return;
+      try{
+        await dayRef.delete();
+      }catch(err){
+        alert('刪除失敗，請檢查網路連線：' + err.message);
+        return;
+      }
       clearTabCache('itinerary');
-      clearTabCache('items', btn.dataset.delDay);
+      clearTabCache('items', dayId);
       renderItineraryTab(el);
     };
   });
