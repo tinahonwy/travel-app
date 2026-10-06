@@ -952,37 +952,25 @@ async function maybeShowAnnouncement(){
     console.warn('讀取公告失敗（可能離線或尚未設定規則）：', err);
   }
 }
-// 團員頁的「公告」卡片：不論有沒有按過「不再顯示」，都可以在這裡查看（最新一則展開，更早的收合）
+// 團員頁的「公告」卡片：只顯示目前最新的一則（跟彈窗一樣的那一則）。
+// 不論有沒有按過「不再顯示」，都可以在這裡重新查看；不保留更早的公告。
 async function loadAnnouncementCard(el){
   const box = el.querySelector('#announcementList');
   if(!box) return;
   try{
-    const snap = await db.collection('announcements').orderBy('createdAt','desc').limit(10).get();
-    const list = snap.docs
-      .map(d=>({id:d.id, ...d.data()}))
-      .filter(a=>a.active !== false && a.body);   // 管理員撤下的公告不顯示
-    if(list.length === 0){
+    const snap = await db.collection('announcements').orderBy('createdAt','desc').limit(1).get();
+    const latest = snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+    // 最新一則被管理員撤下，就視為目前沒有公告
+    if(!latest || latest.active === false || !latest.body){
       box.innerHTML = `<div class="empty-state" style="padding:14px 0;">目前沒有公告</div>`;
       return;
     }
-    const bodyStyle = 'white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.8;color:var(--ink-soft);';
-    const latest = list[0];
-    const older = list.slice(1, 6);
     box.innerHTML = `
       <div style="padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--paper);">
         <div style="font-weight:700;font-size:15px;margin-bottom:2px;">${esc(latest.title || '公告')}</div>
-        <div class="record-meta" style="margin:0 0 8px;">${formatPostTime(latest.createdAt)}　最新</div>
-        <div style="${bodyStyle}">${annLinkify(latest.body)}</div>
+        <div class="record-meta" style="margin:0 0 8px;">${formatPostTime(latest.createdAt)}</div>
+        <div style="white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.8;color:var(--ink-soft);">${annLinkify(latest.body)}</div>
       </div>
-      ${older.length ? `
-        <p class="subtitle" style="margin:14px 0 8px;font-size:12.5px;">更早的公告</p>
-        ${older.map(a=>`
-          <details style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--paper-card);">
-            <summary style="cursor:pointer;font-size:13.5px;font-weight:600;">${esc(a.title || '公告')}<span class="record-meta" style="display:inline;margin-left:8px;font-weight:400;">${formatPostTime(a.createdAt)}</span></summary>
-            <div style="${bodyStyle}margin-top:8px;">${annLinkify(a.body)}</div>
-          </details>
-        `).join('')}
-      ` : ''}
     `;
   }catch(err){
     box.innerHTML = `<div class="empty-state" style="padding:14px 0;">公告載入失敗：${esc(err.message)}</div>`;
@@ -4864,7 +4852,7 @@ async function renderMembersTab(el){
     </div>
     <div class="card" id="announcementCard">
       <h2>📢 公告</h2>
-      <p class="subtitle" style="margin-bottom:10px;">按過「不再顯示」的公告，之後都可以在這裡重新查看</p>
+      <p class="subtitle" style="margin-bottom:10px;">這裡顯示目前最新的公告，按過「不再顯示」也可以在這裡重新查看</p>
       <div id="announcementList"><div class="empty-state" style="padding:14px 0;">載入中…</div></div>
     </div>
     <div class="card">
