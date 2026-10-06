@@ -319,6 +319,93 @@ function clearAllTripCache(){
   const prefix = currentTrip.id + '|';
   Object.keys(tabDataCache).forEach(k=>{ if(k.startsWith(prefix)) delete tabDataCache[k]; });
 }
+
+// ==============================================================
+// 多人同時編輯保護
+//  第 1 層：只送出「這次真的有改的欄位」，別人改的其他欄位不會被你蓋掉；
+//          備忘錄、連結改成「加入一筆／移除一筆」，兩個人同時各加一則都會留下。
+//  第 2 層：儲存前在「交易」裡檢查——如果你改的那個欄位，在你開始編輯之後
+//          已經被別人改過，會先問你要不要覆蓋，不會悄悄蓋掉；
+//          如果這筆資料已經被刪除，會明確告知，不再沒反應。
+// ==============================================================
+// 把「沒有值」統一成預設值再比較（舊資料可能缺少某些欄位）
+function normForCompare(v, key, defaults){
+  if(v === undefined || v === null){
+    return JSON.stringify(defaults && defaults[key] !== undefined ? defaults[key] : '');
+  }
+  return JSON.stringify(v);
+}
+// 比較「原本載入的資料」跟「表單現在的值」，只回傳有變的欄位
+function diffChanges(original, next, defaults){
+  const changes = {};
+  Object.keys(next).forEach(k=>{
+    if(normForCompare(original[k], k, defaults) !== normForCompare(next[k], k, defaults)) changes[k] = next[k];
+  });
+  return changes;
+}
+// opts: { defaults, labels, title, extra }
+//   extra：一起寫入、但不參與衝突檢查的欄位（例如 editedAt）
+// 回傳 'ok'（已儲存）｜'noop'（沒有任何修改）｜'cancelled'（發現衝突，使用者選擇放棄）
+// 資料已被刪除時丟出 Error('DELETED')
+async function safeUpdateDoc(docRef, original, changes, opts){
+  opts = opts || {};
+  const keys = Object.keys(changes);
+  if(keys.length === 0) return 'noop';
+  const payload = Object.assign({}, changes, opts.extra || {});
+  let conflicts = [];
+  try{
+    await db.runTransaction(async (tx)=>{
+      const snap = await tx.get(docRef);
+      if(!snap.exists) throw new Error('DELETED');
+      const cur = snap.data();
+      conflicts = keys.filter(k =>
+        normForCompare(cur[k], k, opts.defaults) !== normForCompare(original[k], k, opts.defaults));
+      if(conflicts.length > 0) throw new Error('CONFLICT');
+      tx.update(docRef, payload);
+    });
+    return 'ok';
+  }catch(err){
+    if(err && err.message === 'CONFLICT'){
+      const names = conflicts.map(k => (opts.labels && opts.labels[k]) || k).join('、');
+      const ok = confirm(`「${opts.title || '這筆資料'}」在你編輯的時候，已經被其他團員修改過（${names}）。\n\n按「確定」：用你剛打的內容覆蓋。\n按「取消」：放棄你的修改，改看最新內容。`);
+      if(!ok) return 'cancelled';
+      await db.runTransaction(async (tx)=>{
+        const snap = await tx.get(docRef);
+        if(!snap.exists) throw new Error('DELETED');
+        tx.update(docRef, payload);
+      });
+      return 'ok';
+    }
+    throw err;
+  }
+}
+// 儲存失敗的共用處理：回傳 true 代表「資料已被刪除，可以直接重畫畫面」
+function handleSaveError(err, what){
+  if(err && (err.message === 'DELETED' || err.code === 'not-found')){
+    alert(`這筆${what}已經被其他團員刪除了，畫面會重新整理。`);
+    return true;
+  }
+  alert('儲存失敗，請檢查網路連線：' + (err && err.message ? err.message : err));
+  return false;
+}
+// 從清單欄位（備忘錄、連結）移除一筆：在交易裡用 id 過濾，不影響別人同時新增的項目
+async function removeFromArrayById(docRef, field, id){
+  await db.runTransaction(async (tx)=>{
+    const snap = await tx.get(docRef);
+    if(!snap.exists) throw new Error('DELETED');
+    const arr = (snap.data()[field] || []).filter(x => x.id !== id);
+    tx.update(docRef, { [field]: arr });
+  });
+}
+
+const ITEM_DEFAULTS = {time:'', endTime:'', title:'', note:'', link:'', visibility:'shared', visibleTo:[], authorUid:''};
+const ITEM_LABELS = {time:'時間', endTime:'結束時間', title:'標題', note:'備註', link:'連結', visibility:'可見範圍', visibleTo:'可見的人', authorUid:'建立者'};
+const DAY_DEFAULTS = {date:'', title:''};
+const DAY_LABELS = {date:'日期', title:'標題'};
+const EXP_DEFAULTS = {title:'', amount:'', currency:'TWD', exchangeRate:1, customCurrencyName:'', payerId:'', date:'', splitWith:[], splitType:'equal'};
+const EXP_LABELS = {title:'項目', amount:'金額', currency:'幣別', exchangeRate:'匯率', customCurrencyName:'幣別名稱', payerId:'誰先付', date:'日期', splitWith:'分攤的人', splitType:'分攤方式'};
+const POST_DEFAULTS = {text:'', images:[]};
+const POST_LABELS = {text:'內文', images:'圖片'};
 // ------------------------------------------------------------
 // 離線管理：斷網時保留畫面現況、鎖定所有寫入操作（表單、按鈕、輸入框），
 // 只在頂部顯示提示條；網路恢復時跳出確認彈窗，使用者按下確定才重新整理頁面拿最新資料，
@@ -1773,21 +1860,42 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
   if(!detailEl) return;
 
   function refresh(){ mountItemDetail(collectionRef, item, scopeEl); }
+  // 寫入成功後，向資料庫抓一次最新的備忘錄／連結，讓你也看到別人同時加的那幾筆
+  async function syncFromServer(){
+    try{
+      const snap = await collectionRef.doc(item.id).get();
+      if(snap.exists){
+        const d = snap.data();
+        item.memos = d.memos || [];
+        item.links = d.links || [];
+        refresh();
+      }
+    }catch(e){}
+  }
+  function reportArrayError(err, action){
+    if(err && (err.message === 'DELETED' || err.code === 'not-found')){
+      alert('這筆行程已經被其他團員刪除了，請關閉後按「更新」。');
+    }else{
+      alert(action + '失敗，請檢查網路連線：' + (err && err.message ? err.message : err));
+    }
+  }
 
   detailEl.querySelectorAll('[data-del-memo]').forEach(btn=>{
     btn.onclick = async ()=>{
-      item.memos = (item.memos||[]).filter(m=>m.id!==btn.dataset.delMemo);
+      const id = btn.dataset.delMemo;
+      item.memos = (item.memos||[]).filter(m=>m.id!==id);
       refresh();
-      try{ await collectionRef.doc(item.id).update({memos:item.memos}); }
-      catch(err){ alert('刪除備忘錄失敗，請檢查網路連線：'+err.message); }
+      try{ await removeFromArrayById(collectionRef.doc(item.id), 'memos', id); await syncFromServer(); }
+      catch(err){ reportArrayError(err, '刪除備忘錄'); }
     };
   });
   detailEl.querySelectorAll('[data-del-link]').forEach(btn=>{
     btn.onclick = async ()=>{
-      item.links = (item.links||[]).filter(l=>l.id!==btn.dataset.delLink);
+      const id = btn.dataset.delLink;
+      item.links = (item.links||[]).filter(l=>l.id!==id);
       refresh();
-      try{ await collectionRef.doc(item.id).update({links:item.links}); }
-      catch(err){ alert('刪除連結失敗，請檢查網路連線：'+err.message); }
+      try{ await removeFromArrayById(collectionRef.doc(item.id), 'links', id); await syncFromServer(); }
+      catch(err){ reportArrayError(err, '刪除連結'); }
     };
   });
   const memoForm = detailEl.querySelector('[data-add-memo]');
@@ -1834,8 +1942,11 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
     if(pendingMemoImage) newMemo.image = pendingMemoImage;
     item.memos = [...(item.memos||[]), newMemo];
     refresh();
-    try{ await collectionRef.doc(item.id).update({memos:item.memos}); }
-    catch(err){ alert('儲存備忘錄失敗，請檢查網路連線：'+err.message); }
+    try{
+      // arrayUnion：在資料庫端「加入一筆」，不是整份覆蓋，兩個人同時各加一則都會保留
+      await collectionRef.doc(item.id).update({ memos: firebase.firestore.FieldValue.arrayUnion(newMemo) });
+      await syncFromServer();
+    }catch(err){ reportArrayError(err, '儲存備忘錄'); }
   };
   const linkForm = detailEl.querySelector('[data-add-link]');
   linkForm.onsubmit = async (e)=>{
@@ -1843,10 +1954,13 @@ function bindItemDetailHandlers(collectionRef, item, scopeEl){
     const label = linkForm.querySelector('.detail-link-label').value.trim();
     const url = linkForm.querySelector('.detail-link-url').value.trim();
     if(!url) return;
-    item.links = [...(item.links||[]), {id:genId(), label, url}];
+    const newLink = {id:genId(), label, url};
+    item.links = [...(item.links||[]), newLink];
     refresh();
-    try{ await collectionRef.doc(item.id).update({links:item.links}); }
-    catch(err){ alert('儲存連結失敗，請檢查網路連線：'+err.message); }
+    try{
+      await collectionRef.doc(item.id).update({ links: firebase.firestore.FieldValue.arrayUnion(newLink) });
+      await syncFromServer();
+    }catch(err){ reportArrayError(err, '儲存連結'); }
   };
 }
 
@@ -2663,7 +2777,16 @@ async function renderItineraryTab(el){
       const title = formBox.querySelector('.day-e-title').value.trim();
       if(!title){ alert('請輸入標題'); return; }
       if(!date){ alert('請選擇日期'); return; }
-      await db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId).update({ date, title });
+      const dayOrig = days.find(x=>x.id===dayId) || {};
+      const dayRef = db.collection('trips').doc(currentTrip.id).collection('days').doc(dayId);
+      let canRefresh = true;
+      try{
+        await safeUpdateDoc(dayRef, dayOrig, diffChanges(dayOrig, { date, title }, DAY_DEFAULTS),
+          { defaults: DAY_DEFAULTS, labels: DAY_LABELS, title: dayOrig.title || '這一天' });
+      }catch(err){
+        canRefresh = handleSaveError(err, '天');
+      }
+      if(!canRefresh) return;
       clearTabCache('itinerary');
       renderItineraryTab(el);
     };
@@ -2814,17 +2937,25 @@ async function renderItemsFor(dayId){
         const endTime = endHourVal ? `${endHourVal}:${endMinVal || '00'}` : '';
         if(!title){ alert('請輸入標題'); return; }
         const priv = readPrivateFields(formEl, 'it');
-        await collectionRef.doc(item.id).update({
+        const nextItem = {
           time: `${hourVal}:${minVal}`,
           endTime,
           title,
           note: formEl.querySelector('.it-note').value.trim(),
           link: formEl.querySelector('.it-link').value.trim(),
           visibility: priv.visibility,
-          visibleTo: priv.visibleTo,
-          // 改成私人時，建立者換成目前編輯的人，確保編輯者自己看得到這筆
-          authorUid: priv.visibility === 'private' ? currentUser.uid : (item.authorUid || currentUser.uid)
-        });
+          visibleTo: priv.visibleTo
+        };
+        // 改成私人時，建立者換成目前編輯的人，確保編輯者自己看得到這筆
+        if(priv.visibility === 'private') nextItem.authorUid = currentUser.uid;
+        let canRefresh = true;
+        try{
+          await safeUpdateDoc(collectionRef.doc(item.id), item, diffChanges(item, nextItem, ITEM_DEFAULTS),
+            { defaults: ITEM_DEFAULTS, labels: ITEM_LABELS, title: item.title || '這筆行程' });
+        }catch(err){
+          canRefresh = handleSaveError(err, '行程');
+        }
+        if(!canRefresh) return;
         clearTabCache('items', dayId);
         renderItemsFor(dayId);
       };
@@ -3689,23 +3820,34 @@ async function renderPostsTab(el){
         const saveBtn = formEl.querySelector('.post-e-save');
         saveBtn.disabled = true; saveBtn.textContent = '儲存中…';
         try{
-          const updateData = {
-            text,
-            editedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            editedByName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員',
-            image: firebase.firestore.FieldValue.delete() // 舊版單張圖片欄位，統一改存 images 陣列
-          };
-          if(pendingImages.length>0){
-            updateData.images = pendingImages;
-          } else {
-            updateData.images = firebase.firestore.FieldValue.delete();
+          // 只送出「文字」「圖片」中真的有改的部分；編輯時間、編輯者是附帶資訊，不算衝突
+          const origImages = post.images || (post.image ? [post.image] : []);
+          const contentChanges = {};
+          if(text !== (post.text || '')) contentChanges.text = text;
+          if(JSON.stringify(pendingImages) !== JSON.stringify(origImages)){
+            contentChanges.images = pendingImages.length>0 ? pendingImages : firebase.firestore.FieldValue.delete();
           }
-          await db.collection('trips').doc(currentTrip.id).collection('posts').doc(post.id).update(updateData);
+          const extra = {
+            editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            editedByName: (currentProfile && (currentProfile.displayName || currentProfile.email)) || '未知成員'
+          };
+          if(post.image !== undefined){
+            extra.image = firebase.firestore.FieldValue.delete(); // 舊版單張圖片欄位，統一改存 images 陣列
+          }
+          await safeUpdateDoc(
+            db.collection('trips').doc(currentTrip.id).collection('posts').doc(post.id),
+            post, contentChanges,
+            { defaults: POST_DEFAULTS, labels: POST_LABELS, title: '這篇貼文', extra }
+          );
           clearTabCache('posts');
           renderPostsTab(el);
         }catch(err){
-          alert('儲存失敗，請檢查網路連線：'+err.message);
-          saveBtn.disabled = false; saveBtn.textContent = '儲存';
+          if(handleSaveError(err, '貼文')){
+            clearTabCache('posts');
+            renderPostsTab(el);
+          }else{
+            saveBtn.disabled = false; saveBtn.textContent = '儲存';
+          }
         }
       };
     };
@@ -4168,9 +4310,18 @@ async function renderExpensesTab(el){
         if(currency!=='TWD' && (!exchangeRate || exchangeRate<=0)){ alert('請輸入這個幣別對台幣的匯率'); return; }
         if(currency==='OTHER' && !customCurrencyName){ alert('請輸入幣別名稱'); return; }
         if(splitWith.length===0){ alert('至少要選一個人分攤這筆花費'); return; }
-        await db.collection('trips').doc(currentTrip.id).collection('expenses').doc(exp.id).update({
-          title, amount, currency, exchangeRate, customCurrencyName, payerId, date, splitWith, splitType:'equal'
-        });
+        const nextExp = { title, amount, currency, exchangeRate, customCurrencyName, payerId, date, splitWith, splitType:'equal' };
+        let canRefresh = true;
+        try{
+          await safeUpdateDoc(
+            db.collection('trips').doc(currentTrip.id).collection('expenses').doc(exp.id),
+            exp, diffChanges(exp, nextExp, EXP_DEFAULTS),
+            { defaults: EXP_DEFAULTS, labels: EXP_LABELS, title: exp.title || '這筆花費' }
+          );
+        }catch(err){
+          canRefresh = handleSaveError(err, '花費');
+        }
+        if(!canRefresh) return;
         clearTabCache('expenses');
         renderExpensesTab(el);
       };
